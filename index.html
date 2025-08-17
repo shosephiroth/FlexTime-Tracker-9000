@@ -187,6 +187,7 @@
                 <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import</label>
                 <input type="file" id="importFile" class="hidden" accept=".json">
                 <button id="exportJsonBtn" class="pixel-button p-3">Export JSON</button>
+                <button id="exportCsvBtn" class="pixel-button p-3">Export CSV</button>
                 <button id="commitDayBtn" class="pixel-button pixel-button-blue p-3">Save Day</button>
                 <button id="copyDayBtn" class="pixel-button p-3">Copy Day</button>
                 <button id="copyWeekBtn" class="pixel-button p-3">Copy Week</button>
@@ -266,6 +267,7 @@
             const workdayBasis = document.getElementById('workdayBasis');
             const toggleTimezoneBtn = document.getElementById('toggleTimezoneBtn');
             const exportJsonBtn = document.getElementById('exportJsonBtn');
+            const exportCsvBtn = document.getElementById('exportCsvBtn');
             const importFile = document.getElementById('importFile');
             const commitDayBtn = document.getElementById('commitDayBtn');
             const copyDayBtn = document.getElementById('copyDayBtn');
@@ -915,6 +917,19 @@
                 const dataStr = JSON.stringify(state, null, 2);
                 const dataBlob = new Blob([dataStr], { type: 'application/json' });
                 downloadFile(URL.createObjectURL(dataBlob), 'flex-time-backup-all.json');
+            });
+
+            exportCsvBtn.addEventListener('click', () => {
+                let csvContent = "Date,Type,Timestamp\n";
+                const sortedKeys = Object.keys(state.allPunches).sort();
+                for (const dateKey of sortedKeys) {
+                    const dayData = state.allPunches[dateKey];
+                    dayData.punches.forEach(p => {
+                        csvContent += `${dateKey},${p.type},"${p.timestamp}"\n`;
+                    });
+                }
+                const dataBlob = new Blob([csvContent], { type: 'text/csv' });
+                downloadFile(URL.createObjectURL(dataBlob), 'flex-time-export-all.csv');
             });
 
             importFile.addEventListener('change', (event) => {
