@@ -69,12 +69,13 @@
         .text-shadow {
             text-shadow: 2px 2px 0 #000;
         }
-        input[type="datetime-local"] {
+        input[type="datetime-local"], select {
             background-color: #333;
             border: 2px solid #f0f0f0;
             color: #f0f0f0;
             padding: 8px;
             font-family: 'Press Start 2P', cursive;
+            width: 100%;
         }
         ::-webkit-scrollbar { width: 16px; }
         ::-webkit-scrollbar-track { background: #2a2a2a; border-left: 4px solid #f0f0f0; }
@@ -116,13 +117,14 @@
         </div>
 
         <!-- Punch Controls -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <button id="clockInBtn" class="pixel-button pixel-button-green p-4 text-lg">Clock In</button>
             <button id="clockOutBtn" class="pixel-button pixel-button-red p-4 text-lg">Clock Out</button>
             <button id="lunchInBtn" class="pixel-button pixel-button-blue p-4 text-lg">Lunch In</button>
             <button id="lunchOutBtn" class="pixel-button pixel-button-yellow p-4 text-lg">Lunch Out</button>
         </div>
-        <div class="text-center mb-8">
+         <div class="text-center mb-8 flex justify-center gap-4">
+             <button id="addPunchBtn" class="pixel-button p-3">Add Manual Punch</button>
              <button id="backToTodayBtn" class="pixel-button p-3 hidden">Back to Today</button>
         </div>
 
@@ -171,6 +173,22 @@
     </div>
 
     <!-- Modals -->
+    <div id="addPunchModal" class="modal-backdrop hidden">
+        <div class="modal-content pixel-border p-6">
+            <h2 class="text-2xl mb-4 text-shadow text-yellow-400">> Add Punch_</h2>
+            <select id="addPunchType" class="mb-4">
+                <option>Clock In</option>
+                <option>Clock Out</option>
+                <option>Lunch In</option>
+                <option>Lunch Out</option>
+            </select>
+            <input type="datetime-local" id="addTimestampInput" class="w-full mb-4">
+            <div class="flex justify-end gap-4">
+                <button id="cancelAddBtn" class="pixel-button p-3">Cancel</button>
+                <button id="saveAddBtn" class="pixel-button pixel-button-green p-3">Save</button>
+            </div>
+        </div>
+    </div>
     <div id="editModal" class="modal-backdrop hidden">
         <div class="modal-content pixel-border p-6">
             <h2 class="text-2xl mb-4 text-shadow text-yellow-400">> Edit Timestamp_</h2>
@@ -204,6 +222,7 @@
             const clockOutBtn = document.getElementById('clockOutBtn');
             const lunchInBtn = document.getElementById('lunchInBtn');
             const lunchOutBtn = document.getElementById('lunchOutBtn');
+            const addPunchBtn = document.getElementById('addPunchBtn');
             const punchLog = document.getElementById('punchLog');
             const flexBankMinutesEl = document.getElementById('flexBankMinutes');
             const flexBankHoursEl = document.getElementById('flexBankHours');
@@ -223,6 +242,11 @@
             const nextMonthBtn = document.getElementById('nextMonthBtn');
             
             // Modal Elements
+            const addPunchModal = document.getElementById('addPunchModal');
+            const addPunchType = document.getElementById('addPunchType');
+            const addTimestampInput = document.getElementById('addTimestampInput');
+            const saveAddBtn = document.getElementById('saveAddBtn');
+            const cancelAddBtn = document.getElementById('cancelAddBtn');
             const editModal = document.getElementById('editModal');
             const editTimestampInput = document.getElementById('editTimestampInput');
             const saveEditBtn = document.getElementById('saveEditBtn');
@@ -252,15 +276,22 @@
 
             // --- Core Functions ---
             
-            function addPunch(type) {
+            function addPunch(type, timestamp) {
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
                 if (!state.allPunches[viewingDateKey]) {
                     state.allPunches[viewingDateKey] = [];
                 }
-                const newPunchTime = new Date();
-                newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
+                
+                let punchTimestamp;
+                if (timestamp) {
+                    punchTimestamp = new Date(timestamp).toISOString();
+                } else {
+                    const newPunchTime = new Date();
+                    newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
+                    punchTimestamp = newPunchTime.toISOString();
+                }
 
-                state.allPunches[viewingDateKey].push({ type, timestamp: newPunchTime.toISOString() });
+                state.allPunches[viewingDateKey].push({ type, timestamp: punchTimestamp });
                 saveState();
                 render();
             }
@@ -347,16 +378,23 @@
                 const todayKey = toYYYYMMDD(new Date());
 
                 for (const dateKey in state.allPunches) {
-                    if (dateKey === todayKey) continue;
+                    if (dateKey === todayKey && toYYYYMMDD(state.viewingDate) !== todayKey) continue;
                     
                     const dailyMinutes = calculateDailyWorkedMinutes(state.allPunches[dateKey]);
                     if (dailyMinutes > 0) {
                         totalFlex += (dailyMinutes - DAILY_GOAL_MINUTES);
                     }
                 }
-                state.flexBankMinutes = totalFlex;
-
+                
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                if (viewingDateKey !== todayKey) {
+                     state.flexBankMinutes = totalFlex;
+                } else {
+                     const todayMinutes = calculateDailyWorkedMinutes(state.allPunches[todayKey] || []);
+                     const todayFlex = todayMinutes > 0 ? todayMinutes - DAILY_GOAL_MINUTES : 0;
+                     state.flexBankMinutes = totalFlex - todayFlex;
+                }
+
                 const viewingDayMinutes = calculateDailyWorkedMinutes(state.allPunches[viewingDateKey] || []);
                 const viewingDayFlex = viewingDayMinutes > 0 ? viewingDayMinutes - DAILY_GOAL_MINUTES : 0;
                 
@@ -445,11 +483,11 @@
 
             // --- State Management ---
             function saveState() {
-                localStorage.setItem('flexTimeTrackerState_v2', JSON.stringify(state));
+                localStorage.setItem('flexTimeTrackerState_v3', JSON.stringify(state));
             }
 
             function loadState() {
-                const savedState = localStorage.getItem('flexTimeTrackerState_v2');
+                const savedState = localStorage.getItem('flexTimeTrackerState_v3');
                 if (savedState) {
                     const parsedState = JSON.parse(savedState);
                     parsedState.calendarDate = new Date(parsedState.calendarDate);
@@ -529,6 +567,32 @@
                 }
             });
 
+            // --- Modal Logic ---
+            addPunchBtn.addEventListener('click', () => {
+                const now = new Date();
+                const viewingDate = state.viewingDate;
+                // Set the default time to now, but on the viewing date
+                const defaultDate = new Date(viewingDate.getFullYear(), viewingDate.getMonth(), viewingDate.getDate(), now.getHours(), now.getMinutes());
+                
+                const tzoffset = defaultDate.getTimezoneOffset() * 60000;
+                const localISOTime = (new Date(defaultDate - tzoffset)).toISOString().slice(0, 16);
+                addTimestampInput.value = localISOTime;
+                addPunchModal.classList.remove('hidden');
+            });
+
+            cancelAddBtn.addEventListener('click', () => addPunchModal.classList.add('hidden'));
+
+            saveAddBtn.addEventListener('click', () => {
+                const type = addPunchType.value;
+                const timestamp = addTimestampInput.value;
+                if (!timestamp) {
+                    showMessage("Please select a valid date and time.");
+                    return;
+                }
+                addPunch(type, timestamp);
+                addPunchModal.classList.add('hidden');
+            });
+
             saveEditBtn.addEventListener('click', () => {
                 if (state.editingPunchIndex !== null) {
                     const viewingDateKey = toYYYYMMDD(state.viewingDate);
@@ -547,7 +611,6 @@
                 editModal.classList.add('hidden');
             }
             
-            // --- Modal Logic ---
             function showMessage(message) {
                 messageText.textContent = message;
                 messageModal.classList.remove('hidden');
@@ -582,7 +645,8 @@
 
             exportCsvBtn.addEventListener('click', () => {
                 let csvContent = "Date,Type,Timestamp\n";
-                for (const dateKey in state.allPunches) {
+                const sortedKeys = Object.keys(state.allPunches).sort();
+                for (const dateKey of sortedKeys) {
                     state.allPunches[dateKey].forEach(p => {
                         csvContent += `${dateKey},${p.type},"${p.timestamp}"\n`;
                     });
