@@ -36,6 +36,15 @@
             transform: translate(4px, 4px);
             box-shadow: none;
         }
+        .pixel-button:disabled {
+            background-color: #333;
+            box-shadow: 4px 4px 0px #555;
+            color: #777;
+            cursor: not-allowed;
+        }
+        .pixel-button:disabled:active {
+            transform: none;
+        }
         .pixel-button-green { background-color: #2a8a2a; }
         .pixel-button-red { background-color: #a02a2a; }
         .pixel-button-blue { background-color: #2a2a8a; }
@@ -215,6 +224,7 @@
                 renderPunchLog();
                 calculateAndRenderFlexBank();
                 updateTimezoneButton();
+                updateButtonStates(); // Update button enabled/disabled states
             }
 
             /**
@@ -226,8 +236,13 @@
                     punchLog.innerHTML = '<tr><td colspan="3" class="p-2 text-center text-gray-400">[ No punches for today ]</td></tr>';
                     return;
                 }
+                
+                // Create a copy and sort for rendering to not affect original order for editing
+                const sortedPunches = [...state.punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-                state.punches.forEach((punch, index) => {
+                sortedPunches.forEach((punch) => {
+                    // Find original index to allow editing the correct punch
+                    const originalIndex = state.punches.findIndex(p => p.timestamp === punch.timestamp && p.type === punch.type);
                     const tr = document.createElement('tr');
                     const date = new Date(punch.timestamp);
                     const formattedTime = state.isUTC ? date.toUTCString() : date.toLocaleString();
@@ -236,12 +251,49 @@
                         <td class="p-2">${punch.type}</td>
                         <td class="p-2">${formattedTime}</td>
                         <td class="p-2">
-                            <button class="pixel-button text-sm p-1" data-index="${index}">Edit</button>
+                            <button class="pixel-button text-sm p-1" data-index="${originalIndex}">Edit</button>
                         </td>
                     `;
                     punchLog.appendChild(tr);
                 });
             }
+            
+            /**
+             * Updates the enabled/disabled state of punch buttons based on the last action.
+             */
+            function updateButtonStates() {
+                // Default to all disabled
+                clockInBtn.disabled = true;
+                clockOutBtn.disabled = true;
+                lunchInBtn.disabled = true;
+                lunchOutBtn.disabled = true;
+
+                if (state.punches.length === 0) {
+                    clockInBtn.disabled = false; // Can only clock in at the start of the day
+                    return;
+                }
+
+                const sortedPunches = [...state.punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                const lastPunch = sortedPunches[sortedPunches.length - 1];
+
+                switch (lastPunch.type) {
+                    case 'Clock In':
+                    case 'Lunch In':
+                        // If clocked in or back from lunch, can clock out or go to lunch
+                        clockOutBtn.disabled = false;
+                        lunchOutBtn.disabled = false;
+                        break;
+                    case 'Lunch Out':
+                        // If on lunch, can only come back from lunch
+                        lunchInBtn.disabled = false;
+                        break;
+                    case 'Clock Out':
+                        // If clocked out, can only clock in again
+                        clockInBtn.disabled = false;
+                        break;
+                }
+            }
+
 
             /**
              * Calculates total worked minutes for the day and updates the Flex Bank display.
