@@ -69,7 +69,7 @@
         .text-shadow {
             text-shadow: 2px 2px 0 #000;
         }
-        input[type="datetime-local"], select {
+        input[type="datetime-local"], select, input[type="number"] {
             background-color: #333;
             border: 2px solid #f0f0f0;
             color: #f0f0f0;
@@ -159,7 +159,7 @@
             <div class="text-xl space-y-2">
                 <p>Banked Total: <span id="flexBankHours" class="text-yellow-400">0h 0m</span></p>
                 <p>Day's Accrual: <span id="dayAccrual" class="text-yellow-400">0h 0m</span></p>
-                <p class="text-sm mt-2">(Based on an 8-hour workday)</p>
+                <p id="workdayBasis" class="text-sm mt-2"></p>
             </div>
         </div>
 
@@ -167,11 +167,12 @@
         <div class="pixel-border p-4">
             <h2 class="text-2xl mb-4 text-shadow text-red-400">> System Controls_</h2>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <button id="settingsBtn" class="pixel-button p-3">Settings</button>
                 <button id="toggleTimezoneBtn" class="pixel-button p-3">Show UTC</button>
                 <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import</label>
                 <input type="file" id="importFile" class="hidden" accept=".json">
                 <button id="exportJsonBtn" class="pixel-button p-3">Export JSON</button>
-                <button id="exportCsvBtn" class="pixel-button p-3">Export CSV</button>
+                
                 <button id="commitDayBtn" class="pixel-button pixel-button-blue p-3">Save Day</button>
                 <button id="copyDayBtn" class="pixel-button p-3">Copy Day</button>
                 <button id="copyWeekBtn" class="pixel-button p-3">Copy Week</button>
@@ -182,6 +183,17 @@
     </div>
 
     <!-- Modals -->
+    <div id="settingsModal" class="modal-backdrop hidden">
+        <div class="modal-content pixel-border p-6">
+            <h2 class="text-2xl mb-6 text-shadow text-yellow-400">> Settings_</h2>
+            <label for="dailyGoalHoursInput" class="block mb-2 text-sm">Hours in a workday:</label>
+            <input type="number" id="dailyGoalHoursInput" class="w-full mb-6" step="0.1" min="0">
+            <div class="flex justify-end gap-4">
+                <button id="cancelSettingsBtn" class="pixel-button p-3">Cancel</button>
+                <button id="saveSettingsBtn" class="pixel-button pixel-button-green p-3">Save</button>
+            </div>
+        </div>
+    </div>
     <div id="addPunchModal" class="modal-backdrop hidden">
         <div class="modal-content pixel-border p-6">
             <h2 class="text-2xl mb-4 text-shadow text-yellow-400">> Add Punch_</h2>
@@ -236,9 +248,9 @@
             const punchLog = document.getElementById('punchLog');
             const flexBankHoursEl = document.getElementById('flexBankHours');
             const dayAccrualEl = document.getElementById('dayAccrual');
+            const workdayBasis = document.getElementById('workdayBasis');
             const toggleTimezoneBtn = document.getElementById('toggleTimezoneBtn');
             const exportJsonBtn = document.getElementById('exportJsonBtn');
-            const exportCsvBtn = document.getElementById('exportCsvBtn');
             const importFile = document.getElementById('importFile');
             const commitDayBtn = document.getElementById('commitDayBtn');
             const copyDayBtn = document.getElementById('copyDayBtn');
@@ -248,6 +260,7 @@
             const viewingDateHeader = document.getElementById('viewingDateHeader');
             const backToTodayBtn = document.getElementById('backToTodayBtn');
             const copyStatus = document.getElementById('copyStatus');
+            const settingsBtn = document.getElementById('settingsBtn');
             
             // Calendar Elements
             const calendarGrid = document.getElementById('calendarGrid');
@@ -256,6 +269,10 @@
             const nextMonthBtn = document.getElementById('nextMonthBtn');
             
             // Modal Elements
+            const settingsModal = document.getElementById('settingsModal');
+            const dailyGoalHoursInput = document.getElementById('dailyGoalHoursInput');
+            const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+            const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
             const addPunchModal = document.getElementById('addPunchModal');
             const addPunchType = document.getElementById('addPunchType');
             const addTimestampInput = document.getElementById('addTimestampInput');
@@ -276,6 +293,9 @@
             // --- App State ---
             let state = {
                 allPunches: {}, // Keyed by 'YYYY-MM-DD'
+                settings: {
+                    dailyGoalHours: 8,
+                },
                 isUTC: false,
                 editingPunchIndex: null,
                 calendarDate: new Date(),
@@ -285,7 +305,6 @@
                 copiedData: null,
             };
 
-            const DAILY_GOAL_MINUTES = 8 * 60;
             const toYYYYMMDD = (date) => date.toISOString().slice(0, 10);
 
             // --- Core Functions ---
@@ -403,13 +422,14 @@
             function calculateAndRenderFlexBank() {
                 let committedFlex = 0;
                 const todayKey = toYYYYMMDD(new Date());
+                const dailyGoalMinutes = state.settings.dailyGoalHours * 60;
 
                 for (const dateKey in state.allPunches) {
                     if (dateKey >= todayKey) continue;
                     
                     const dailyMinutes = calculateDailyWorkedMinutes(state.allPunches[dateKey]);
                     if (dailyMinutes > 0) {
-                        committedFlex += (dailyMinutes - DAILY_GOAL_MINUTES);
+                        committedFlex += (dailyMinutes - dailyGoalMinutes);
                     }
                 }
                 flexBankHoursEl.textContent = formatMinutesToHours(committedFlex);
@@ -417,8 +437,9 @@
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
                 const viewingDayPunches = state.allPunches[viewingDateKey] || [];
                 const viewingDayMinutes = calculateDailyWorkedMinutes(viewingDayPunches);
-                const viewingDayFlex = viewingDayMinutes > 0 ? viewingDayMinutes - DAILY_GOAL_MINUTES : 0;
+                const viewingDayFlex = viewingDayMinutes > 0 ? viewingDayMinutes - dailyGoalMinutes : 0;
                 dayAccrualEl.textContent = formatMinutesToHours(viewingDayFlex);
+                workdayBasis.textContent = `(Based on a ${state.settings.dailyGoalHours}-hour workday)`;
             }
 
             function calculateDailyWorkedMinutes(punches) {
@@ -492,16 +513,21 @@
 
             // --- State Management ---
             function saveState() {
-                localStorage.setItem('flexTimeTrackerState_v5', JSON.stringify(state));
+                localStorage.setItem('flexTimeTrackerState_v6', JSON.stringify(state));
             }
 
             function loadState() {
-                const savedState = localStorage.getItem('flexTimeTrackerState_v5');
+                const savedState = localStorage.getItem('flexTimeTrackerState_v6');
                 if (savedState) {
                     const parsedState = JSON.parse(savedState);
-                    parsedState.calendarDate = new Date(parsedState.calendarDate);
-                    parsedState.viewingDate = new Date(parsedState.viewingDate);
-                    state = parsedState;
+                    // Merge saved state with default state to handle new properties
+                    state = { ...state, ...parsedState };
+                    state.calendarDate = new Date(state.calendarDate);
+                    state.viewingDate = new Date(state.viewingDate);
+                    // Ensure settings object exists
+                    if (!state.settings) {
+                        state.settings = { dailyGoalHours: 8 };
+                    }
                 }
             }
             
@@ -691,6 +717,25 @@
             });
 
             // --- Modal Logic ---
+            settingsBtn.addEventListener('click', () => {
+                dailyGoalHoursInput.value = state.settings.dailyGoalHours;
+                settingsModal.classList.remove('hidden');
+            });
+
+            cancelSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+
+            saveSettingsBtn.addEventListener('click', () => {
+                const newHours = parseFloat(dailyGoalHoursInput.value);
+                if (!isNaN(newHours) && newHours > 0) {
+                    state.settings.dailyGoalHours = newHours;
+                    saveState();
+                    render();
+                    settingsModal.classList.add('hidden');
+                } else {
+                    showMessage('Please enter a valid number of hours.');
+                }
+            });
+
             addPunchBtn.addEventListener('click', () => {
                 const now = new Date();
                 const viewingDate = state.viewingDate;
@@ -760,18 +805,6 @@
                 downloadFile(URL.createObjectURL(dataBlob), 'flex-time-backup-all.json');
             });
 
-            exportCsvBtn.addEventListener('click', () => {
-                let csvContent = "Date,Type,Timestamp\n";
-                const sortedKeys = Object.keys(state.allPunches).sort();
-                for (const dateKey of sortedKeys) {
-                    state.allPunches[dateKey].forEach(p => {
-                        csvContent += `${dateKey},${p.type},"${p.timestamp}"\n`;
-                    });
-                }
-                const dataBlob = new Blob([csvContent], { type: 'text/csv' });
-                downloadFile(URL.createObjectURL(dataBlob), 'flex-time-export-all.csv');
-            });
-
             importFile.addEventListener('change', (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -780,9 +813,16 @@
                     try {
                         const importedData = JSON.parse(e.target.result);
                         if (importedData.allPunches) {
-                            importedData.calendarDate = new Date(importedData.calendarDate);
-                            importedData.viewingDate = new Date(importedData.viewingDate);
-                            state = importedData;
+                            // Merge imported data with defaults to ensure new settings are not lost
+                            const defaultState = {
+                                settings: { dailyGoalHours: 8 },
+                                isUTC: false,
+                                copyMode: null,
+                                copiedData: null,
+                            };
+                            state = { ...defaultState, ...importedData };
+                            state.calendarDate = new Date(state.calendarDate);
+                            state.viewingDate = new Date(state.viewingDate);
                             saveState();
                             render();
                             showMessage('Data successfully imported!');
