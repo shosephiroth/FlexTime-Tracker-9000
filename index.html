@@ -164,7 +164,8 @@
                 <button id="exportCsvBtn" class="pixel-button p-3">Export CSV</button>
                 <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import JSON</label>
                 <input type="file" id="importFile" class="hidden" accept=".json">
-                <button id="commitDayBtn" class="pixel-button pixel-button-red p-3 col-span-2 md:col-span-1 lg:col-span-1">Commit & New Day</button>
+                <button id="commitDayBtn" class="pixel-button pixel-button-blue p-3">Save Day</button>
+                <button id="clearDayBtn" class="pixel-button pixel-button-red p-3 col-span-2 md:col-span-3 lg:col-span-5">Clear Entire Day</button>
             </div>
         </div>
     </div>
@@ -186,6 +187,15 @@
             <button id="closeMessageBtn" class="pixel-button p-3">OK</button>
         </div>
     </div>
+    <div id="confirmModal" class="modal-backdrop hidden">
+        <div class="modal-content pixel-border p-6 text-center">
+            <p id="confirmText" class="text-xl mb-6"></p>
+            <div class="flex justify-center gap-4">
+                <button id="cancelConfirmBtn" class="pixel-button p-3">Cancel</button>
+                <button id="confirmBtn" class="pixel-button pixel-button-red p-3">Confirm</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
@@ -202,6 +212,7 @@
             const exportCsvBtn = document.getElementById('exportCsvBtn');
             const importFile = document.getElementById('importFile');
             const commitDayBtn = document.getElementById('commitDayBtn');
+            const clearDayBtn = document.getElementById('clearDayBtn');
             const viewingDateHeader = document.getElementById('viewingDateHeader');
             const backToTodayBtn = document.getElementById('backToTodayBtn');
             
@@ -219,6 +230,10 @@
             const messageModal = document.getElementById('messageModal');
             const messageText = document.getElementById('messageText');
             const closeMessageBtn = document.getElementById('closeMessageBtn');
+            const confirmModal = document.getElementById('confirmModal');
+            const confirmText = document.getElementById('confirmText');
+            const confirmBtn = document.getElementById('confirmBtn');
+            const cancelConfirmBtn = document.getElementById('cancelConfirmBtn');
 
             // --- App State ---
             let state = {
@@ -226,13 +241,13 @@
                 flexBankMinutes: 0,
                 isUTC: false,
                 editingPunchIndex: null,
-                calendarDate: new Date(), // The month/year being viewed in the calendar
-                viewingDate: new Date(), // The specific day whose log is being viewed
+                calendarDate: new Date(),
+                viewingDate: new Date(),
+                confirmCallback: null,
             };
 
             const DAILY_GOAL_MINUTES = 8 * 60;
 
-            // --- Date Formatting Helper ---
             const toYYYYMMDD = (date) => date.toISOString().slice(0, 10);
 
             // --- Core Functions ---
@@ -243,7 +258,6 @@
                     state.allPunches[viewingDateKey] = [];
                 }
                 const newPunchTime = new Date();
-                // Ensure the new punch's date matches the viewing date
                 newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
 
                 state.allPunches[viewingDateKey].push({ type, timestamp: newPunchTime.toISOString() });
@@ -255,18 +269,19 @@
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
                 const todayKey = toYYYYMMDD(new Date());
                 const isViewingToday = viewingDateKey === todayKey;
+                const punchesForDay = state.allPunches[viewingDateKey] || [];
 
                 renderCalendar();
-                renderPunchLog(state.allPunches[viewingDateKey] || []);
+                renderPunchLog(punchesForDay);
                 calculateAndRenderFlexBank();
                 updateTimezoneButton();
-                updateButtonStates(state.allPunches[viewingDateKey] || []);
+                updateButtonStates(punchesForDay);
                 
                 viewingDateHeader.textContent = `[ ${state.viewingDate.toDateString()} ]`;
                 backToTodayBtn.classList.toggle('hidden', isViewingToday);
                 commitDayBtn.textContent = isViewingToday ? 'Commit & New Day' : 'Save Day';
+                clearDayBtn.disabled = punchesForDay.length === 0;
                 
-                // Disable punch controls if not viewing today
                 const punchButtons = [clockInBtn, clockOutBtn, lunchInBtn, lunchOutBtn];
                 punchButtons.forEach(btn => btn.disabled = !isViewingToday || btn.disabled);
             }
@@ -289,8 +304,9 @@
                     tr.innerHTML = `
                         <td class="p-2">${punch.type}</td>
                         <td class="p-2">${formattedTime}</td>
-                        <td class="p-2">
-                            <button class="pixel-button text-sm p-1" data-index="${originalIndex}">Edit</button>
+                        <td class="p-2 flex gap-2">
+                            <button class="pixel-button text-sm p-1" data-index="${originalIndex}" data-action="edit">Edit</button>
+                            <button class="pixel-button pixel-button-red text-sm p-1" data-index="${originalIndex}" data-action="delete">Del</button>
                         </td>
                     `;
                     punchLog.appendChild(tr);
@@ -327,11 +343,11 @@
             }
 
             function calculateAndRenderFlexBank() {
-                // Calculation should be based on ALL historical data, not just one day
                 let totalFlex = 0;
+                const todayKey = toYYYYMMDD(new Date());
+
                 for (const dateKey in state.allPunches) {
-                    // Don't include today's uncommitted time in the saved bank
-                    if (dateKey === toYYYYMMDD(new Date())) continue;
+                    if (dateKey === todayKey) continue;
                     
                     const dailyMinutes = calculateDailyWorkedMinutes(state.allPunches[dateKey]);
                     if (dailyMinutes > 0) {
@@ -340,7 +356,6 @@
                 }
                 state.flexBankMinutes = totalFlex;
 
-                // Add current day's flex for display purposes
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
                 const viewingDayMinutes = calculateDailyWorkedMinutes(state.allPunches[viewingDateKey] || []);
                 const viewingDayFlex = viewingDayMinutes > 0 ? viewingDayMinutes - DAILY_GOAL_MINUTES : 0;
@@ -399,14 +414,12 @@
                 const firstDayOfMonth = new Date(year, month, 1).getDay();
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-                // Add blank days for the start of the month
                 for (let i = 0; i < firstDayOfMonth; i++) {
                     const dayEl = document.createElement('div');
                     dayEl.classList.add('calendar-day', 'other-month');
                     calendarGrid.appendChild(dayEl);
                 }
 
-                // Add actual days
                 for (let i = 1; i <= daysInMonth; i++) {
                     const dayEl = document.createElement('div');
                     const dayDate = new Date(year, month, i);
@@ -439,7 +452,6 @@
                 const savedState = localStorage.getItem('flexTimeTrackerState_v2');
                 if (savedState) {
                     const parsedState = JSON.parse(savedState);
-                    // Convert date strings back to Date objects
                     parsedState.calendarDate = new Date(parsedState.calendarDate);
                     parsedState.viewingDate = new Date(parsedState.viewingDate);
                     state = parsedState;
@@ -458,23 +470,18 @@
             });
             
             commitDayBtn.addEventListener('click', () => {
-                const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                const todayKey = toYYYYMMDD(new Date());
-
-                if (viewingDateKey === todayKey) { // Commit & New Day
-                    const dailyMinutes = calculateDailyWorkedMinutes(state.allPunches[todayKey] || []);
-                    if (dailyMinutes > 0) {
-                        const dailyFlex = dailyMinutes - DAILY_GOAL_MINUTES;
-                        state.flexBankMinutes += dailyFlex;
-                    }
-                    // This logic is simplified now. We just save. The concept of "new day" is handled by the date.
-                    saveState();
-                    showMessage('Day committed to Flex Bank!');
-                } else { // Save Day
-                    saveState();
-                    showMessage(`Data for ${viewingDateKey} has been saved.`);
-                }
+                saveState();
+                showMessage(`Data for ${toYYYYMMDD(state.viewingDate)} has been saved.`);
                 render();
+            });
+            
+            clearDayBtn.addEventListener('click', () => {
+                showConfirmation('Are you sure you want to clear all punches for this day?', () => {
+                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                    state.allPunches[viewingDateKey] = [];
+                    saveState();
+                    render();
+                });
             });
             
             backToTodayBtn.addEventListener('click', () => {
@@ -483,7 +490,6 @@
                 render();
             });
 
-            // Calendar Navigation
             prevMonthBtn.addEventListener('click', () => {
                 state.calendarDate.setMonth(state.calendarDate.getMonth() - 1);
                 renderCalendar();
@@ -494,26 +500,32 @@
             });
             calendarGrid.addEventListener('click', (e) => {
                 if (e.target.classList.contains('calendar-day') && e.target.dataset.date) {
-                    state.viewingDate = new Date(e.target.dataset.date + 'T12:00:00'); // Set to noon to avoid timezone issues
+                    state.viewingDate = new Date(e.target.dataset.date + 'T12:00:00');
                     render();
                 }
             });
 
-            // Edit Modal Logic
             punchLog.addEventListener('click', (e) => {
-                if (e.target.tagName === 'BUTTON') {
-                    const index = parseInt(e.target.dataset.index, 10);
-                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                    const punchesForDay = state.allPunches[viewingDateKey] || [];
-                    
-                    state.editingPunchIndex = index;
-                    const punchTimestamp = new Date(punchesForDay[index].timestamp);
-                    
+                const button = e.target.closest('button');
+                if (!button) return;
+
+                const { action, index } = button.dataset;
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+
+                if (action === 'edit') {
+                    state.editingPunchIndex = parseInt(index, 10);
+                    const punchTimestamp = new Date(state.allPunches[viewingDateKey][state.editingPunchIndex].timestamp);
                     const tzoffset = punchTimestamp.getTimezoneOffset() * 60000;
                     const localISOTime = (new Date(punchTimestamp - tzoffset)).toISOString().slice(0, 16);
-                    
                     editTimestampInput.value = localISOTime;
                     editModal.classList.remove('hidden');
+                } else if (action === 'delete') {
+                    showConfirmation('Delete this punch?', () => {
+                        const idxToDelete = parseInt(index, 10);
+                        state.allPunches[viewingDateKey].splice(idxToDelete, 1);
+                        saveState();
+                        render();
+                    });
                 }
             });
 
@@ -535,14 +547,33 @@
                 editModal.classList.add('hidden');
             }
             
+            // --- Modal Logic ---
             function showMessage(message) {
                 messageText.textContent = message;
                 messageModal.classList.remove('hidden');
             }
-            
             closeMessageBtn.addEventListener('click', () => messageModal.classList.add('hidden'));
 
-            // Import/Export Logic
+            function showConfirmation(message, onConfirm) {
+                confirmText.textContent = message;
+                state.confirmCallback = onConfirm;
+                confirmModal.classList.remove('hidden');
+            }
+            
+            cancelConfirmBtn.addEventListener('click', () => {
+                state.confirmCallback = null;
+                confirmModal.classList.add('hidden');
+            });
+
+            confirmBtn.addEventListener('click', () => {
+                if (state.confirmCallback) {
+                    state.confirmCallback();
+                }
+                state.confirmCallback = null;
+                confirmModal.classList.add('hidden');
+            });
+
+            // --- Import/Export Logic ---
             exportJsonBtn.addEventListener('click', () => {
                 const dataStr = JSON.stringify(state, null, 2);
                 const dataBlob = new Blob([dataStr], { type: 'application/json' });
@@ -568,7 +599,6 @@
                     try {
                         const importedData = JSON.parse(e.target.result);
                         if (importedData.allPunches && typeof importedData.flexBankMinutes === 'number') {
-                            // Re-hydrate dates
                             importedData.calendarDate = new Date(importedData.calendarDate);
                             importedData.viewingDate = new Date(importedData.viewingDate);
                             state = importedData;
