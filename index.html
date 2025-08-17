@@ -96,11 +96,16 @@
         .calendar-day.is-today { background-color: #2a2a8a; }
         .calendar-day.is-viewing { background-color: #2a8a2a; }
         .calendar-day.other-month { color: #666; }
+        .is-copying .calendar-day:hover {
+            cursor: copy;
+            background-color: #b4a62a !important;
+            color: #1a1a1a !important;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
 
-    <div class="container mx-auto max-w-4xl">
+    <div id="appContainer" class="container mx-auto max-w-4xl">
         <h1 class="text-3xl md:text-5xl text-center mb-8 text-shadow text-yellow-400">[ FlexTime Tracker 9000 ]</h1>
 
         <!-- Calendar View -->
@@ -117,6 +122,7 @@
         </div>
 
         <!-- Punch Controls -->
+        <p id="copyStatus" class="text-center text-yellow-400 mb-4 hidden"></p>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <button id="clockInBtn" class="pixel-button pixel-button-green p-4 text-lg">Clock In</button>
             <button id="clockOutBtn" class="pixel-button pixel-button-red p-4 text-lg">Clock Out</button>
@@ -150,9 +156,9 @@
         <!-- Flex Bank -->
         <div class="pixel-border p-4 mb-8">
             <h2 class="text-2xl mb-4 text-shadow text-blue-400">> Flex Bank_</h2>
-            <div class="text-xl">
-                <p>Total Minutes: <span id="flexBankMinutes" class="text-yellow-400">0</span></p>
-                <p>Total Hours: <span id="flexBankHours" class="text-yellow-400">0h 0m</span></p>
+            <div class="text-xl space-y-2">
+                <p>Banked Total: <span id="flexBankHours" class="text-yellow-400">0h 0m</span></p>
+                <p>Day's Accrual: <span id="dayAccrual" class="text-yellow-400">0h 0m</span></p>
                 <p class="text-sm mt-2">(Based on an 8-hour workday)</p>
             </div>
         </div>
@@ -160,14 +166,15 @@
         <!-- App Controls -->
         <div class="pixel-border p-4">
             <h2 class="text-2xl mb-4 text-shadow text-red-400">> System Controls_</h2>
-            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <button id="toggleTimezoneBtn" class="pixel-button p-3">Show UTC</button>
                 <button id="exportJsonBtn" class="pixel-button p-3">Export JSON</button>
                 <button id="exportCsvBtn" class="pixel-button p-3">Export CSV</button>
                 <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import JSON</label>
                 <input type="file" id="importFile" class="hidden" accept=".json">
                 <button id="commitDayBtn" class="pixel-button pixel-button-blue p-3">Save Day</button>
-                <button id="clearDayBtn" class="pixel-button pixel-button-red p-3 col-span-2 md:col-span-3 lg:col-span-5">Clear Entire Day</button>
+                <button id="copyDayBtn" class="pixel-button p-3">Copy Day</button>
+                <button id="clearDayBtn" class="pixel-button pixel-button-red p-3 col-span-full">Clear Entire Day</button>
             </div>
         </div>
     </div>
@@ -218,22 +225,25 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // --- DOM Elements ---
+            const appContainer = document.getElementById('appContainer');
             const clockInBtn = document.getElementById('clockInBtn');
             const clockOutBtn = document.getElementById('clockOutBtn');
             const lunchInBtn = document.getElementById('lunchInBtn');
             const lunchOutBtn = document.getElementById('lunchOutBtn');
             const addPunchBtn = document.getElementById('addPunchBtn');
             const punchLog = document.getElementById('punchLog');
-            const flexBankMinutesEl = document.getElementById('flexBankMinutes');
             const flexBankHoursEl = document.getElementById('flexBankHours');
+            const dayAccrualEl = document.getElementById('dayAccrual');
             const toggleTimezoneBtn = document.getElementById('toggleTimezoneBtn');
             const exportJsonBtn = document.getElementById('exportJsonBtn');
             const exportCsvBtn = document.getElementById('exportCsvBtn');
             const importFile = document.getElementById('importFile');
             const commitDayBtn = document.getElementById('commitDayBtn');
+            const copyDayBtn = document.getElementById('copyDayBtn');
             const clearDayBtn = document.getElementById('clearDayBtn');
             const viewingDateHeader = document.getElementById('viewingDateHeader');
             const backToTodayBtn = document.getElementById('backToTodayBtn');
+            const copyStatus = document.getElementById('copyStatus');
             
             // Calendar Elements
             const calendarGrid = document.getElementById('calendarGrid');
@@ -262,12 +272,13 @@
             // --- App State ---
             let state = {
                 allPunches: {}, // Keyed by 'YYYY-MM-DD'
-                flexBankMinutes: 0,
                 isUTC: false,
                 editingPunchIndex: null,
                 calendarDate: new Date(),
                 viewingDate: new Date(),
                 confirmCallback: null,
+                isCopying: false,
+                copiedPunches: null,
             };
 
             const DAILY_GOAL_MINUTES = 8 * 60;
@@ -310,11 +321,20 @@
                 
                 viewingDateHeader.textContent = `[ ${state.viewingDate.toDateString()} ]`;
                 backToTodayBtn.classList.toggle('hidden', isViewingToday);
-                commitDayBtn.textContent = isViewingToday ? 'Commit & New Day' : 'Save Day';
+                commitDayBtn.textContent = isViewingToday ? 'Commit Today' : 'Save Day';
                 clearDayBtn.disabled = punchesForDay.length === 0;
+                copyDayBtn.disabled = punchesForDay.length === 0;
                 
                 const punchButtons = [clockInBtn, clockOutBtn, lunchInBtn, lunchOutBtn];
                 punchButtons.forEach(btn => btn.disabled = !isViewingToday || btn.disabled);
+
+                // Handle copy mode UI
+                appContainer.classList.toggle('is-copying', state.isCopying);
+                copyDayBtn.textContent = state.isCopying ? 'Cancel Copy' : 'Copy Day';
+                copyStatus.classList.toggle('hidden', !state.isCopying);
+                if(state.isCopying) {
+                    copyStatus.textContent = 'Select a destination date on the calendar.';
+                }
             }
 
             function renderPunchLog(punches) {
@@ -374,34 +394,26 @@
             }
 
             function calculateAndRenderFlexBank() {
-                let totalFlex = 0;
+                let committedFlex = 0;
                 const todayKey = toYYYYMMDD(new Date());
 
+                // Calculate the total flex from all days *before* today. This is the "bank".
                 for (const dateKey in state.allPunches) {
-                    if (dateKey === todayKey && toYYYYMMDD(state.viewingDate) !== todayKey) continue;
+                    if (dateKey >= todayKey) continue;
                     
                     const dailyMinutes = calculateDailyWorkedMinutes(state.allPunches[dateKey]);
                     if (dailyMinutes > 0) {
-                        totalFlex += (dailyMinutes - DAILY_GOAL_MINUTES);
+                        committedFlex += (dailyMinutes - DAILY_GOAL_MINUTES);
                     }
                 }
-                
-                const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                if (viewingDateKey !== todayKey) {
-                     state.flexBankMinutes = totalFlex;
-                } else {
-                     const todayMinutes = calculateDailyWorkedMinutes(state.allPunches[todayKey] || []);
-                     const todayFlex = todayMinutes > 0 ? todayMinutes - DAILY_GOAL_MINUTES : 0;
-                     state.flexBankMinutes = totalFlex - todayFlex;
-                }
+                flexBankHoursEl.textContent = formatMinutesToHours(committedFlex);
 
-                const viewingDayMinutes = calculateDailyWorkedMinutes(state.allPunches[viewingDateKey] || []);
+                // Calculate the flex for the day currently being viewed for the "accrual" line.
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                const viewingDayPunches = state.allPunches[viewingDateKey] || [];
+                const viewingDayMinutes = calculateDailyWorkedMinutes(viewingDayPunches);
                 const viewingDayFlex = viewingDayMinutes > 0 ? viewingDayMinutes - DAILY_GOAL_MINUTES : 0;
-                
-                const displayFlexMinutes = state.flexBankMinutes + viewingDayFlex;
-                
-                flexBankMinutesEl.textContent = displayFlexMinutes.toFixed(0);
-                flexBankHoursEl.textContent = formatMinutesToHours(displayFlexMinutes);
+                dayAccrualEl.textContent = formatMinutesToHours(viewingDayFlex);
             }
 
             function calculateDailyWorkedMinutes(punches) {
@@ -453,9 +465,7 @@
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
 
                 for (let i = 0; i < firstDayOfMonth; i++) {
-                    const dayEl = document.createElement('div');
-                    dayEl.classList.add('calendar-day', 'other-month');
-                    calendarGrid.appendChild(dayEl);
+                    calendarGrid.appendChild(document.createElement('div')).classList.add('calendar-day', 'other-month');
                 }
 
                 for (let i = 1; i <= daysInMonth; i++) {
@@ -467,15 +477,9 @@
                     dayEl.classList.add('calendar-day');
                     dayEl.dataset.date = dayKey;
 
-                    if (state.allPunches[dayKey] && state.allPunches[dayKey].length > 0) {
-                        dayEl.classList.add('has-data');
-                    }
-                    if (dayKey === toYYYYMMDD(new Date())) {
-                        dayEl.classList.add('is-today');
-                    }
-                    if (dayKey === toYYYYMMDD(state.viewingDate)) {
-                        dayEl.classList.add('is-viewing');
-                    }
+                    if (state.allPunches[dayKey] && state.allPunches[dayKey].length > 0) dayEl.classList.add('has-data');
+                    if (dayKey === toYYYYMMDD(new Date())) dayEl.classList.add('is-today');
+                    if (dayKey === toYYYYMMDD(state.viewingDate)) dayEl.classList.add('is-viewing');
                     
                     calendarGrid.appendChild(dayEl);
                 }
@@ -483,11 +487,11 @@
 
             // --- State Management ---
             function saveState() {
-                localStorage.setItem('flexTimeTrackerState_v3', JSON.stringify(state));
+                localStorage.setItem('flexTimeTrackerState_v4', JSON.stringify(state));
             }
 
             function loadState() {
-                const savedState = localStorage.getItem('flexTimeTrackerState_v3');
+                const savedState = localStorage.getItem('flexTimeTrackerState_v4');
                 if (savedState) {
                     const parsedState = JSON.parse(savedState);
                     parsedState.calendarDate = new Date(parsedState.calendarDate);
@@ -513,6 +517,17 @@
                 render();
             });
             
+            copyDayBtn.addEventListener('click', () => {
+                state.isCopying = !state.isCopying;
+                if (state.isCopying) {
+                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                    state.copiedPunches = state.allPunches[viewingDateKey] ? JSON.parse(JSON.stringify(state.allPunches[viewingDateKey])) : [];
+                } else {
+                    state.copiedPunches = null;
+                }
+                render();
+            });
+
             clearDayBtn.addEventListener('click', () => {
                 showConfirmation('Are you sure you want to clear all punches for this day?', () => {
                     const viewingDateKey = toYYYYMMDD(state.viewingDate);
@@ -538,8 +553,28 @@
             });
             calendarGrid.addEventListener('click', (e) => {
                 if (e.target.classList.contains('calendar-day') && e.target.dataset.date) {
-                    state.viewingDate = new Date(e.target.dataset.date + 'T12:00:00');
-                    render();
+                    const targetDateKey = e.target.dataset.date;
+                    if (state.isCopying) {
+                        showConfirmation(`Paste punches to ${targetDateKey}? This will overwrite existing data.`, () => {
+                            const newPunches = JSON.parse(JSON.stringify(state.copiedPunches));
+                            const [year, month, day] = targetDateKey.split('-').map(Number);
+
+                            newPunches.forEach(punch => {
+                                const oldDate = new Date(punch.timestamp);
+                                const newDate = new Date(Date.UTC(year, month - 1, day, oldDate.getUTCHours(), oldDate.getUTCMinutes(), oldDate.getUTCSeconds()));
+                                punch.timestamp = newDate.toISOString();
+                            });
+
+                            state.allPunches[targetDateKey] = newPunches;
+                            state.isCopying = false;
+                            state.copiedPunches = null;
+                            saveState();
+                            render();
+                        });
+                    } else {
+                        state.viewingDate = new Date(targetDateKey + 'T12:00:00');
+                        render();
+                    }
                 }
             });
 
@@ -559,8 +594,7 @@
                     editModal.classList.remove('hidden');
                 } else if (action === 'delete') {
                     showConfirmation('Delete this punch?', () => {
-                        const idxToDelete = parseInt(index, 10);
-                        state.allPunches[viewingDateKey].splice(idxToDelete, 1);
+                        state.allPunches[viewingDateKey].splice(parseInt(index, 10), 1);
                         saveState();
                         render();
                     });
@@ -571,9 +605,7 @@
             addPunchBtn.addEventListener('click', () => {
                 const now = new Date();
                 const viewingDate = state.viewingDate;
-                // Set the default time to now, but on the viewing date
                 const defaultDate = new Date(viewingDate.getFullYear(), viewingDate.getMonth(), viewingDate.getDate(), now.getHours(), now.getMinutes());
-                
                 const tzoffset = defaultDate.getTimezoneOffset() * 60000;
                 const localISOTime = (new Date(defaultDate - tzoffset)).toISOString().slice(0, 16);
                 addTimestampInput.value = localISOTime;
@@ -583,13 +615,11 @@
             cancelAddBtn.addEventListener('click', () => addPunchModal.classList.add('hidden'));
 
             saveAddBtn.addEventListener('click', () => {
-                const type = addPunchType.value;
-                const timestamp = addTimestampInput.value;
-                if (!timestamp) {
+                if (!addTimestampInput.value) {
                     showMessage("Please select a valid date and time.");
                     return;
                 }
-                addPunch(type, timestamp);
+                addPunch(addPunchType.value, addTimestampInput.value);
                 addPunchModal.classList.add('hidden');
             });
 
@@ -629,9 +659,7 @@
             });
 
             confirmBtn.addEventListener('click', () => {
-                if (state.confirmCallback) {
-                    state.confirmCallback();
-                }
+                if (state.confirmCallback) state.confirmCallback();
                 state.confirmCallback = null;
                 confirmModal.classList.add('hidden');
             });
@@ -662,7 +690,7 @@
                 reader.onload = (e) => {
                     try {
                         const importedData = JSON.parse(e.target.result);
-                        if (importedData.allPunches && typeof importedData.flexBankMinutes === 'number') {
+                        if (importedData.allPunches) {
                             importedData.calendarDate = new Date(importedData.calendarDate);
                             importedData.viewingDate = new Date(importedData.viewingDate);
                             state = importedData;
