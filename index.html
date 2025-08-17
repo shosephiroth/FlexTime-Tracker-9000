@@ -166,14 +166,16 @@
         <!-- App Controls -->
         <div class="pixel-border p-4">
             <h2 class="text-2xl mb-4 text-shadow text-red-400">> System Controls_</h2>
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <button id="toggleTimezoneBtn" class="pixel-button p-3">Show UTC</button>
+                <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import</label>
+                <input type="file" id="importFile" class="hidden" accept=".json">
                 <button id="exportJsonBtn" class="pixel-button p-3">Export JSON</button>
                 <button id="exportCsvBtn" class="pixel-button p-3">Export CSV</button>
-                <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import JSON</label>
-                <input type="file" id="importFile" class="hidden" accept=".json">
                 <button id="commitDayBtn" class="pixel-button pixel-button-blue p-3">Save Day</button>
                 <button id="copyDayBtn" class="pixel-button p-3">Copy Day</button>
+                <button id="copyWeekBtn" class="pixel-button p-3">Copy Week</button>
+                <button id="copyMonthBtn" class="pixel-button p-3">Copy Month</button>
                 <button id="clearDayBtn" class="pixel-button pixel-button-red p-3 col-span-full">Clear Entire Day</button>
             </div>
         </div>
@@ -240,6 +242,8 @@
             const importFile = document.getElementById('importFile');
             const commitDayBtn = document.getElementById('commitDayBtn');
             const copyDayBtn = document.getElementById('copyDayBtn');
+            const copyWeekBtn = document.getElementById('copyWeekBtn');
+            const copyMonthBtn = document.getElementById('copyMonthBtn');
             const clearDayBtn = document.getElementById('clearDayBtn');
             const viewingDateHeader = document.getElementById('viewingDateHeader');
             const backToTodayBtn = document.getElementById('backToTodayBtn');
@@ -277,16 +281,14 @@
                 calendarDate: new Date(),
                 viewingDate: new Date(),
                 confirmCallback: null,
-                isCopying: false,
-                copiedPunches: null,
+                copyMode: null, // can be 'day', 'week', 'month'
+                copiedData: null,
             };
 
             const DAILY_GOAL_MINUTES = 8 * 60;
-
             const toYYYYMMDD = (date) => date.toISOString().slice(0, 10);
 
             // --- Core Functions ---
-            
             function addPunch(type, timestamp) {
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
                 if (!state.allPunches[viewingDateKey]) {
@@ -323,17 +325,22 @@
                 backToTodayBtn.classList.toggle('hidden', isViewingToday);
                 commitDayBtn.textContent = isViewingToday ? 'Commit Today' : 'Save Day';
                 clearDayBtn.disabled = punchesForDay.length === 0;
-                copyDayBtn.disabled = punchesForDay.length === 0;
                 
                 const punchButtons = [clockInBtn, clockOutBtn, lunchInBtn, lunchOutBtn];
                 punchButtons.forEach(btn => btn.disabled = !isViewingToday || btn.disabled);
 
                 // Handle copy mode UI
-                appContainer.classList.toggle('is-copying', state.isCopying);
-                copyDayBtn.textContent = state.isCopying ? 'Cancel Copy' : 'Copy Day';
-                copyStatus.classList.toggle('hidden', !state.isCopying);
-                if(state.isCopying) {
-                    copyStatus.textContent = 'Select a destination date on the calendar.';
+                appContainer.classList.toggle('is-copying', !!state.copyMode);
+                copyDayBtn.textContent = state.copyMode === 'day' ? 'Cancel' : 'Copy Day';
+                copyWeekBtn.textContent = state.copyMode === 'week' ? 'Cancel' : 'Copy Week';
+                copyMonthBtn.textContent = state.copyMode === 'month' ? 'Cancel' : 'Copy Month';
+                copyDayBtn.disabled = punchesForDay.length === 0 && state.copyMode !== 'day';
+                copyWeekBtn.disabled = state.copyMode && state.copyMode !== 'week';
+                copyMonthBtn.disabled = state.copyMode && state.copyMode !== 'month';
+
+                copyStatus.classList.toggle('hidden', !state.copyMode);
+                if(state.copyMode) {
+                    copyStatus.textContent = `Copying ${state.copyMode}. Select a destination start date.`;
                 }
             }
 
@@ -397,7 +404,6 @@
                 let committedFlex = 0;
                 const todayKey = toYYYYMMDD(new Date());
 
-                // Calculate the total flex from all days *before* today. This is the "bank".
                 for (const dateKey in state.allPunches) {
                     if (dateKey >= todayKey) continue;
                     
@@ -408,7 +414,6 @@
                 }
                 flexBankHoursEl.textContent = formatMinutesToHours(committedFlex);
 
-                // Calculate the flex for the day currently being viewed for the "accrual" line.
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
                 const viewingDayPunches = state.allPunches[viewingDateKey] || [];
                 const viewingDayMinutes = calculateDailyWorkedMinutes(viewingDayPunches);
@@ -487,17 +492,23 @@
 
             // --- State Management ---
             function saveState() {
-                localStorage.setItem('flexTimeTrackerState_v4', JSON.stringify(state));
+                localStorage.setItem('flexTimeTrackerState_v5', JSON.stringify(state));
             }
 
             function loadState() {
-                const savedState = localStorage.getItem('flexTimeTrackerState_v4');
+                const savedState = localStorage.getItem('flexTimeTrackerState_v5');
                 if (savedState) {
                     const parsedState = JSON.parse(savedState);
                     parsedState.calendarDate = new Date(parsedState.calendarDate);
                     parsedState.viewingDate = new Date(parsedState.viewingDate);
                     state = parsedState;
                 }
+            }
+            
+            function cancelCopy() {
+                state.copyMode = null;
+                state.copiedData = null;
+                render();
             }
 
             // --- Event Handlers ---
@@ -518,13 +529,68 @@
             });
             
             copyDayBtn.addEventListener('click', () => {
-                state.isCopying = !state.isCopying;
-                if (state.isCopying) {
-                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                    state.copiedPunches = state.allPunches[viewingDateKey] ? JSON.parse(JSON.stringify(state.allPunches[viewingDateKey])) : [];
-                } else {
-                    state.copiedPunches = null;
+                if (state.copyMode === 'day') {
+                    cancelCopy();
+                    return;
                 }
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                state.copyMode = 'day';
+                state.copiedData = {
+                    punches: state.allPunches[viewingDateKey] ? JSON.parse(JSON.stringify(state.allPunches[viewingDateKey])) : []
+                };
+                render();
+            });
+
+            copyWeekBtn.addEventListener('click', () => {
+                if (state.copyMode === 'week') {
+                    cancelCopy();
+                    return;
+                }
+                const dayOfWeek = state.viewingDate.getDay();
+                const startDate = new Date(state.viewingDate);
+                startDate.setDate(startDate.getDate() - dayOfWeek);
+                
+                const weekPunches = {};
+                for(let i=0; i<7; i++) {
+                    const date = new Date(startDate);
+                    date.setDate(date.getDate() + i);
+                    const dateKey = toYYYYMMDD(date);
+                    if (state.allPunches[dateKey]) {
+                        weekPunches[dateKey] = JSON.parse(JSON.stringify(state.allPunches[dateKey]));
+                    }
+                }
+                state.copyMode = 'week';
+                state.copiedData = {
+                    startDate: toYYYYMMDD(startDate),
+                    punches: weekPunches,
+                };
+                render();
+            });
+            
+            copyMonthBtn.addEventListener('click', () => {
+                if (state.copyMode === 'month') {
+                    cancelCopy();
+                    return;
+                }
+                const year = state.viewingDate.getFullYear();
+                const month = state.viewingDate.getMonth();
+                const startDate = new Date(year, month, 1);
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                const monthPunches = {};
+                for(let i=0; i<daysInMonth; i++) {
+                    const date = new Date(startDate);
+                    date.setDate(date.getDate() + i);
+                    const dateKey = toYYYYMMDD(date);
+                     if (state.allPunches[dateKey]) {
+                        monthPunches[dateKey] = JSON.parse(JSON.stringify(state.allPunches[dateKey]));
+                    }
+                }
+                state.copyMode = 'month';
+                state.copiedData = {
+                    startDate: toYYYYMMDD(startDate),
+                    punches: monthPunches,
+                };
                 render();
             });
 
@@ -554,29 +620,52 @@
             calendarGrid.addEventListener('click', (e) => {
                 if (e.target.classList.contains('calendar-day') && e.target.dataset.date) {
                     const targetDateKey = e.target.dataset.date;
-                    if (state.isCopying) {
-                        showConfirmation(`Paste punches to ${targetDateKey}? This will overwrite existing data.`, () => {
-                            const newPunches = JSON.parse(JSON.stringify(state.copiedPunches));
-                            const [year, month, day] = targetDateKey.split('-').map(Number);
-
-                            newPunches.forEach(punch => {
-                                const oldDate = new Date(punch.timestamp);
-                                const newDate = new Date(Date.UTC(year, month - 1, day, oldDate.getUTCHours(), oldDate.getUTCMinutes(), oldDate.getUTCSeconds()));
-                                punch.timestamp = newDate.toISOString();
-                            });
-
-                            state.allPunches[targetDateKey] = newPunches;
-                            state.isCopying = false;
-                            state.copiedPunches = null;
-                            saveState();
-                            render();
-                        });
+                    if (state.copyMode) {
+                        handlePaste(targetDateKey);
                     } else {
                         state.viewingDate = new Date(targetDateKey + 'T12:00:00');
                         render();
                     }
                 }
             });
+
+            function handlePaste(targetDateKey) {
+                showConfirmation(`Paste punches to ${targetDateKey}? This will overwrite existing data.`, () => {
+                    if (state.copyMode === 'day') {
+                        const newPunches = JSON.parse(JSON.stringify(state.copiedData.punches));
+                        const [year, month, day] = targetDateKey.split('-').map(Number);
+                        newPunches.forEach(punch => {
+                            const oldDate = new Date(punch.timestamp);
+                            const newDate = new Date(Date.UTC(year, month - 1, day, oldDate.getUTCHours(), oldDate.getUTCMinutes(), oldDate.getUTCSeconds()));
+                            punch.timestamp = newDate.toISOString();
+                        });
+                        state.allPunches[targetDateKey] = newPunches;
+                    } else if (state.copyMode === 'week' || state.copyMode === 'month') {
+                        const sourceStartDate = new Date(state.copiedData.startDate + 'T12:00:00');
+                        const destStartDate = new Date(targetDateKey + 'T12:00:00');
+                        
+                        for (const sourceDateKey in state.copiedData.punches) {
+                            const sourceDate = new Date(sourceDateKey + 'T12:00:00');
+                            const offset = (sourceDate - sourceStartDate) / (1000 * 60 * 60 * 24);
+                            
+                            const destDate = new Date(destStartDate);
+                            destDate.setDate(destDate.getDate() + offset);
+                            const destDateKey = toYYYYMMDD(destDate);
+
+                            const newPunches = JSON.parse(JSON.stringify(state.copiedData.punches[sourceDateKey]));
+                            newPunches.forEach(punch => {
+                                const oldDate = new Date(punch.timestamp);
+                                const newDate = new Date(Date.UTC(destDate.getFullYear(), destDate.getMonth(), destDate.getDate(), oldDate.getUTCHours(), oldDate.getUTCMinutes(), oldDate.getUTCSeconds()));
+                                punch.timestamp = newDate.toISOString();
+                            });
+                            state.allPunches[destDateKey] = newPunches;
+                        }
+                    }
+                    cancelCopy();
+                    saveState();
+                    render();
+                });
+            }
 
             punchLog.addEventListener('click', (e) => {
                 const button = e.target.closest('button');
