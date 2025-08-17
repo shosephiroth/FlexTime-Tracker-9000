@@ -69,7 +69,6 @@
         .text-shadow {
             text-shadow: 2px 2px 0 #000;
         }
-        /* Style for datetime-local input */
         input[type="datetime-local"] {
             background-color: #333;
             border: 2px solid #f0f0f0;
@@ -77,27 +76,44 @@
             padding: 8px;
             font-family: 'Press Start 2P', cursive;
         }
-        /* Custom scrollbar for a retro feel */
-        ::-webkit-scrollbar {
-            width: 16px;
+        ::-webkit-scrollbar { width: 16px; }
+        ::-webkit-scrollbar-track { background: #2a2a2a; border-left: 4px solid #f0f0f0; }
+        ::-webkit-scrollbar-thumb { background: #888; border: 4px solid #f0f0f0; }
+        ::-webkit-scrollbar-thumb:hover { background: #aaa; }
+
+        /* Calendar Styles */
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+        .calendar-day {
+            border: 2px solid #555;
+            text-align: center;
+            padding: 8px 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
         }
-        ::-webkit-scrollbar-track {
-            background: #2a2a2a;
-            border-left: 4px solid #f0f0f0;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #888;
-            border: 4px solid #f0f0f0;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #aaa;
-        }
+        .calendar-day:hover { background-color: #4a4a4a; }
+        .calendar-day.has-data { border-color: #b4a62a; color: #b4a62a; }
+        .calendar-day.is-today { background-color: #2a2a8a; }
+        .calendar-day.is-viewing { background-color: #2a8a2a; }
+        .calendar-day.other-month { color: #666; }
     </style>
 </head>
 <body class="p-4 md:p-8">
 
     <div class="container mx-auto max-w-4xl">
         <h1 class="text-3xl md:text-5xl text-center mb-8 text-shadow text-yellow-400">[ FlexTime Tracker 9000 ]</h1>
+
+        <!-- Calendar View -->
+        <div id="calendarView" class="pixel-border p-4 mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <button id="prevMonthBtn" class="pixel-button p-2 text-sm"><<</button>
+                <h2 id="monthYearHeader" class="text-xl text-shadow text-green-400"></h2>
+                <button id="nextMonthBtn" class="pixel-button p-2 text-sm">>></button>
+            </div>
+            <div class="grid grid-cols-7 text-center text-sm pb-2">
+                <div>Su</div><div>Mo</div><div>Tu</div><div>We</div><div>Th</div><div>Fr</div><div>Sa</div>
+            </div>
+            <div id="calendarGrid" class="calendar-grid"></div>
+        </div>
 
         <!-- Punch Controls -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -106,10 +122,15 @@
             <button id="lunchInBtn" class="pixel-button pixel-button-blue p-4 text-lg">Lunch In</button>
             <button id="lunchOutBtn" class="pixel-button pixel-button-yellow p-4 text-lg">Lunch Out</button>
         </div>
+        <div class="text-center mb-8">
+             <button id="backToTodayBtn" class="pixel-button p-3 hidden">Back to Today</button>
+        </div>
+
 
         <!-- Time Log -->
         <div class="pixel-border p-4 mb-8">
-            <h2 class="text-2xl mb-4 text-shadow text-green-400">> Daily Log_</h2>
+            <h2 class="text-2xl mb-2 text-shadow text-green-400">> Daily Log_</h2>
+            <p id="viewingDateHeader" class="text-sm text-yellow-400 mb-4"></p>
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse">
                     <thead>
@@ -119,9 +140,7 @@
                             <th class="p-2 border-b-4 border-gray-400">Action</th>
                         </tr>
                     </thead>
-                    <tbody id="punchLog">
-                        <!-- Punch entries will be injected here -->
-                    </tbody>
+                    <tbody id="punchLog"></tbody>
                 </table>
             </div>
         </div>
@@ -145,12 +164,12 @@
                 <button id="exportCsvBtn" class="pixel-button p-3">Export CSV</button>
                 <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import JSON</label>
                 <input type="file" id="importFile" class="hidden" accept=".json">
-                <button id="newDayBtn" class="pixel-button pixel-button-red p-3 col-span-2 md:col-span-1 lg:col-span-1">Commit & New Day</button>
+                <button id="commitDayBtn" class="pixel-button pixel-button-red p-3 col-span-2 md:col-span-1 lg:col-span-1">Commit & New Day</button>
             </div>
         </div>
     </div>
 
-    <!-- Edit Modal -->
+    <!-- Modals -->
     <div id="editModal" class="modal-backdrop hidden">
         <div class="modal-content pixel-border p-6">
             <h2 class="text-2xl mb-4 text-shadow text-yellow-400">> Edit Timestamp_</h2>
@@ -161,8 +180,6 @@
             </div>
         </div>
     </div>
-    
-    <!-- Message Modal -->
     <div id="messageModal" class="modal-backdrop hidden">
         <div class="modal-content pixel-border p-6 text-center">
             <p id="messageText" class="text-xl mb-4"></p>
@@ -172,7 +189,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // DOM Elements
+            // --- DOM Elements ---
             const clockInBtn = document.getElementById('clockInBtn');
             const clockOutBtn = document.getElementById('clockOutBtn');
             const lunchInBtn = document.getElementById('lunchInBtn');
@@ -184,7 +201,15 @@
             const exportJsonBtn = document.getElementById('exportJsonBtn');
             const exportCsvBtn = document.getElementById('exportCsvBtn');
             const importFile = document.getElementById('importFile');
-            const newDayBtn = document.getElementById('newDayBtn');
+            const commitDayBtn = document.getElementById('commitDayBtn');
+            const viewingDateHeader = document.getElementById('viewingDateHeader');
+            const backToTodayBtn = document.getElementById('backToTodayBtn');
+            
+            // Calendar Elements
+            const calendarGrid = document.getElementById('calendarGrid');
+            const monthYearHeader = document.getElementById('monthYearHeader');
+            const prevMonthBtn = document.getElementById('prevMonthBtn');
+            const nextMonthBtn = document.getElementById('nextMonthBtn');
             
             // Modal Elements
             const editModal = document.getElementById('editModal');
@@ -195,54 +220,68 @@
             const messageText = document.getElementById('messageText');
             const closeMessageBtn = document.getElementById('closeMessageBtn');
 
-            // App State
+            // --- App State ---
             let state = {
-                punches: [],
+                allPunches: {}, // Keyed by 'YYYY-MM-DD'
                 flexBankMinutes: 0,
                 isUTC: false,
                 editingPunchIndex: null,
+                calendarDate: new Date(), // The month/year being viewed in the calendar
+                viewingDate: new Date(), // The specific day whose log is being viewed
             };
 
             const DAILY_GOAL_MINUTES = 8 * 60;
 
-            // --- Core Functions ---
+            // --- Date Formatting Helper ---
+            const toYYYYMMDD = (date) => date.toISOString().slice(0, 10);
 
-            /**
-             * Adds a new punch to the state.
-             * @param {string} type - The type of punch (e.g., 'Clock In').
-             */
+            // --- Core Functions ---
+            
             function addPunch(type) {
-                state.punches.push({ type, timestamp: new Date().toISOString() });
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                if (!state.allPunches[viewingDateKey]) {
+                    state.allPunches[viewingDateKey] = [];
+                }
+                const newPunchTime = new Date();
+                // Ensure the new punch's date matches the viewing date
+                newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
+
+                state.allPunches[viewingDateKey].push({ type, timestamp: newPunchTime.toISOString() });
                 saveState();
                 render();
             }
 
-            /**
-             * Renders the entire application based on the current state.
-             */
             function render() {
-                renderPunchLog();
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                const todayKey = toYYYYMMDD(new Date());
+                const isViewingToday = viewingDateKey === todayKey;
+
+                renderCalendar();
+                renderPunchLog(state.allPunches[viewingDateKey] || []);
                 calculateAndRenderFlexBank();
                 updateTimezoneButton();
-                updateButtonStates(); // Update button enabled/disabled states
+                updateButtonStates(state.allPunches[viewingDateKey] || []);
+                
+                viewingDateHeader.textContent = `[ ${state.viewingDate.toDateString()} ]`;
+                backToTodayBtn.classList.toggle('hidden', isViewingToday);
+                commitDayBtn.textContent = isViewingToday ? 'Commit & New Day' : 'Save Day';
+                
+                // Disable punch controls if not viewing today
+                const punchButtons = [clockInBtn, clockOutBtn, lunchInBtn, lunchOutBtn];
+                punchButtons.forEach(btn => btn.disabled = !isViewingToday || btn.disabled);
             }
 
-            /**
-             * Renders the list of punches in the log table.
-             */
-            function renderPunchLog() {
+            function renderPunchLog(punches) {
                 punchLog.innerHTML = '';
-                if (state.punches.length === 0) {
-                    punchLog.innerHTML = '<tr><td colspan="3" class="p-2 text-center text-gray-400">[ No punches for today ]</td></tr>';
+                if (punches.length === 0) {
+                    punchLog.innerHTML = '<tr><td colspan="3" class="p-2 text-center text-gray-400">[ No punches for this day ]</td></tr>';
                     return;
                 }
                 
-                // Create a copy and sort for rendering to not affect original order for editing
-                const sortedPunches = [...state.punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                const sortedPunches = [...punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
                 sortedPunches.forEach((punch) => {
-                    // Find original index to allow editing the correct punch
-                    const originalIndex = state.punches.findIndex(p => p.timestamp === punch.timestamp && p.type === punch.type);
+                    const originalIndex = punches.findIndex(p => p.timestamp === punch.timestamp && p.type === punch.type);
                     const tr = document.createElement('tr');
                     const date = new Date(punch.timestamp);
                     const formattedTime = state.isUTC ? date.toUTCString() : date.toLocaleString();
@@ -258,74 +297,72 @@
                 });
             }
             
-            /**
-             * Updates the enabled/disabled state of punch buttons based on the last action.
-             */
-            function updateButtonStates() {
-                // Default to all disabled
+            function updateButtonStates(punches) {
                 clockInBtn.disabled = true;
                 clockOutBtn.disabled = true;
                 lunchInBtn.disabled = true;
                 lunchOutBtn.disabled = true;
 
-                if (state.punches.length === 0) {
-                    clockInBtn.disabled = false; // Can only clock in at the start of the day
+                if (punches.length === 0) {
+                    clockInBtn.disabled = false;
                     return;
                 }
 
-                const sortedPunches = [...state.punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                const sortedPunches = [...punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
                 const lastPunch = sortedPunches[sortedPunches.length - 1];
 
                 switch (lastPunch.type) {
                     case 'Clock In':
                     case 'Lunch In':
-                        // If clocked in or back from lunch, can clock out or go to lunch
                         clockOutBtn.disabled = false;
                         lunchOutBtn.disabled = false;
                         break;
                     case 'Lunch Out':
-                        // If on lunch, can only come back from lunch
                         lunchInBtn.disabled = false;
                         break;
                     case 'Clock Out':
-                        // If clocked out, can only clock in again
                         clockInBtn.disabled = false;
                         break;
                 }
             }
 
-
-            /**
-             * Calculates total worked minutes for the day and updates the Flex Bank display.
-             */
             function calculateAndRenderFlexBank() {
-                const dailyMinutes = calculateDailyWorkedMinutes();
-                const dailyFlex = dailyMinutes > 0 ? dailyMinutes - DAILY_GOAL_MINUTES : 0;
-                
-                const totalFlexMinutes = state.flexBankMinutes + dailyFlex;
+                // Calculation should be based on ALL historical data, not just one day
+                let totalFlex = 0;
+                for (const dateKey in state.allPunches) {
+                    // Don't include today's uncommitted time in the saved bank
+                    if (dateKey === toYYYYMMDD(new Date())) continue;
+                    
+                    const dailyMinutes = calculateDailyWorkedMinutes(state.allPunches[dateKey]);
+                    if (dailyMinutes > 0) {
+                        totalFlex += (dailyMinutes - DAILY_GOAL_MINUTES);
+                    }
+                }
+                state.flexBankMinutes = totalFlex;
 
-                flexBankMinutesEl.textContent = totalFlexMinutes.toFixed(0);
-                flexBankHoursEl.textContent = formatMinutesToHours(totalFlexMinutes);
+                // Add current day's flex for display purposes
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                const viewingDayMinutes = calculateDailyWorkedMinutes(state.allPunches[viewingDateKey] || []);
+                const viewingDayFlex = viewingDayMinutes > 0 ? viewingDayMinutes - DAILY_GOAL_MINUTES : 0;
+                
+                const displayFlexMinutes = state.flexBankMinutes + viewingDayFlex;
+                
+                flexBankMinutesEl.textContent = displayFlexMinutes.toFixed(0);
+                flexBankHoursEl.textContent = formatMinutesToHours(displayFlexMinutes);
             }
 
-            /**
-             * Calculates the total minutes worked based on the day's punches.
-             * @returns {number} Total minutes worked today.
-             */
-            function calculateDailyWorkedMinutes() {
+            function calculateDailyWorkedMinutes(punches) {
+                if (!punches || punches.length === 0) return 0;
                 let totalMillis = 0;
                 let clockInTime = null;
                 let lunchOutTime = null;
                 
-                // Sort punches by time to ensure correct calculation order
-                const sortedPunches = [...state.punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                const sortedPunches = [...punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
                 for (const punch of sortedPunches) {
                     const punchTime = new Date(punch.timestamp).getTime();
                     switch (punch.type) {
-                        case 'Clock In':
-                            if (clockInTime === null) clockInTime = punchTime;
-                            break;
+                        case 'Clock In': if (clockInTime === null) clockInTime = punchTime; break;
                         case 'Lunch Out':
                             if (clockInTime !== null && lunchOutTime === null) {
                                 totalMillis += (punchTime - clockInTime);
@@ -335,7 +372,7 @@
                             break;
                         case 'Lunch In':
                             if (lunchOutTime !== null) {
-                                lunchOutTime = null; // Reset lunch, clockIn will resume work period
+                                lunchOutTime = null;
                                 clockInTime = punchTime;
                             }
                             break;
@@ -347,32 +384,69 @@
                             break;
                     }
                 }
-                
-                // If user forgot to clock out, don't count ongoing time
                 return totalMillis / (1000 * 60);
             }
 
-            // --- State Management ---
+            // --- Calendar Functions ---
+            function renderCalendar() {
+                calendarGrid.innerHTML = '';
+                const date = state.calendarDate;
+                const year = date.getFullYear();
+                const month = date.getMonth();
 
-            /**
-             * Saves the current application state to localStorage.
-             */
-            function saveState() {
-                localStorage.setItem('flexTimeTrackerState', JSON.stringify(state));
-            }
+                monthYearHeader.textContent = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-            /**
-             * Loads the application state from localStorage.
-             */
-            function loadState() {
-                const savedState = localStorage.getItem('flexTimeTrackerState');
-                if (savedState) {
-                    state = JSON.parse(savedState);
+                const firstDayOfMonth = new Date(year, month, 1).getDay();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                // Add blank days for the start of the month
+                for (let i = 0; i < firstDayOfMonth; i++) {
+                    const dayEl = document.createElement('div');
+                    dayEl.classList.add('calendar-day', 'other-month');
+                    calendarGrid.appendChild(dayEl);
+                }
+
+                // Add actual days
+                for (let i = 1; i <= daysInMonth; i++) {
+                    const dayEl = document.createElement('div');
+                    const dayDate = new Date(year, month, i);
+                    const dayKey = toYYYYMMDD(dayDate);
+                    
+                    dayEl.textContent = i;
+                    dayEl.classList.add('calendar-day');
+                    dayEl.dataset.date = dayKey;
+
+                    if (state.allPunches[dayKey] && state.allPunches[dayKey].length > 0) {
+                        dayEl.classList.add('has-data');
+                    }
+                    if (dayKey === toYYYYMMDD(new Date())) {
+                        dayEl.classList.add('is-today');
+                    }
+                    if (dayKey === toYYYYMMDD(state.viewingDate)) {
+                        dayEl.classList.add('is-viewing');
+                    }
+                    
+                    calendarGrid.appendChild(dayEl);
                 }
             }
 
-            // --- UI and Event Handlers ---
+            // --- State Management ---
+            function saveState() {
+                localStorage.setItem('flexTimeTrackerState_v2', JSON.stringify(state));
+            }
 
+            function loadState() {
+                const savedState = localStorage.getItem('flexTimeTrackerState_v2');
+                if (savedState) {
+                    const parsedState = JSON.parse(savedState);
+                    // Convert date strings back to Date objects
+                    parsedState.calendarDate = new Date(parsedState.calendarDate);
+                    parsedState.viewingDate = new Date(parsedState.viewingDate);
+                    state = parsedState;
+                }
+            }
+
+            // --- Event Handlers ---
             clockInBtn.addEventListener('click', () => addPunch('Clock In'));
             clockOutBtn.addEventListener('click', () => addPunch('Clock Out'));
             lunchInBtn.addEventListener('click', () => addPunch('Lunch In'));
@@ -383,26 +457,58 @@
                 render();
             });
             
-            newDayBtn.addEventListener('click', () => {
-                const dailyMinutes = calculateDailyWorkedMinutes();
-                if (dailyMinutes > 0) {
-                    const dailyFlex = dailyMinutes - DAILY_GOAL_MINUTES;
-                    state.flexBankMinutes += dailyFlex;
+            commitDayBtn.addEventListener('click', () => {
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                const todayKey = toYYYYMMDD(new Date());
+
+                if (viewingDateKey === todayKey) { // Commit & New Day
+                    const dailyMinutes = calculateDailyWorkedMinutes(state.allPunches[todayKey] || []);
+                    if (dailyMinutes > 0) {
+                        const dailyFlex = dailyMinutes - DAILY_GOAL_MINUTES;
+                        state.flexBankMinutes += dailyFlex;
+                    }
+                    // This logic is simplified now. We just save. The concept of "new day" is handled by the date.
+                    saveState();
+                    showMessage('Day committed to Flex Bank!');
+                } else { // Save Day
+                    saveState();
+                    showMessage(`Data for ${viewingDateKey} has been saved.`);
                 }
-                state.punches = [];
-                saveState();
                 render();
-                showMessage('Day committed to Flex Bank! Ready for a new day.');
+            });
+            
+            backToTodayBtn.addEventListener('click', () => {
+                state.viewingDate = new Date();
+                state.calendarDate = new Date();
+                render();
+            });
+
+            // Calendar Navigation
+            prevMonthBtn.addEventListener('click', () => {
+                state.calendarDate.setMonth(state.calendarDate.getMonth() - 1);
+                renderCalendar();
+            });
+            nextMonthBtn.addEventListener('click', () => {
+                state.calendarDate.setMonth(state.calendarDate.getMonth() + 1);
+                renderCalendar();
+            });
+            calendarGrid.addEventListener('click', (e) => {
+                if (e.target.classList.contains('calendar-day') && e.target.dataset.date) {
+                    state.viewingDate = new Date(e.target.dataset.date + 'T12:00:00'); // Set to noon to avoid timezone issues
+                    render();
+                }
             });
 
             // Edit Modal Logic
             punchLog.addEventListener('click', (e) => {
                 if (e.target.tagName === 'BUTTON') {
                     const index = parseInt(e.target.dataset.index, 10);
-                    state.editingPunchIndex = index;
-                    const punchTimestamp = new Date(state.punches[index].timestamp);
+                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                    const punchesForDay = state.allPunches[viewingDateKey] || [];
                     
-                    // Format for datetime-local input (YYYY-MM-DDTHH:mm)
+                    state.editingPunchIndex = index;
+                    const punchTimestamp = new Date(punchesForDay[index].timestamp);
+                    
                     const tzoffset = punchTimestamp.getTimezoneOffset() * 60000;
                     const localISOTime = (new Date(punchTimestamp - tzoffset)).toISOString().slice(0, 16);
                     
@@ -413,8 +519,9 @@
 
             saveEditBtn.addEventListener('click', () => {
                 if (state.editingPunchIndex !== null) {
+                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
                     const newTimestamp = new Date(editTimestampInput.value).toISOString();
-                    state.punches[state.editingPunchIndex].timestamp = newTimestamp;
+                    state.allPunches[viewingDateKey][state.editingPunchIndex].timestamp = newTimestamp;
                     closeEditModal();
                     saveState();
                     render();
@@ -428,77 +535,58 @@
                 editModal.classList.add('hidden');
             }
             
-            // Message Modal Logic
             function showMessage(message) {
                 messageText.textContent = message;
                 messageModal.classList.remove('hidden');
             }
             
-            closeMessageBtn.addEventListener('click', () => {
-                messageModal.classList.add('hidden');
-            });
+            closeMessageBtn.addEventListener('click', () => messageModal.classList.add('hidden'));
 
             // Import/Export Logic
             exportJsonBtn.addEventListener('click', () => {
-                const dataStr = JSON.stringify({
-                    flexBankMinutes: state.flexBankMinutes,
-                    punches: state.punches
-                }, null, 2);
+                const dataStr = JSON.stringify(state, null, 2);
                 const dataBlob = new Blob([dataStr], { type: 'application/json' });
-                const url = URL.createObjectURL(dataBlob);
-                downloadFile(url, 'flex-time-backup.json');
+                downloadFile(URL.createObjectURL(dataBlob), 'flex-time-backup-all.json');
             });
 
             exportCsvBtn.addEventListener('click', () => {
-                let csvContent = "Type,Timestamp\n";
-                state.punches.forEach(p => {
-                    csvContent += `${p.type},"${p.timestamp}"\n`;
-                });
+                let csvContent = "Date,Type,Timestamp\n";
+                for (const dateKey in state.allPunches) {
+                    state.allPunches[dateKey].forEach(p => {
+                        csvContent += `${dateKey},${p.type},"${p.timestamp}"\n`;
+                    });
+                }
                 const dataBlob = new Blob([csvContent], { type: 'text/csv' });
-                const url = URL.createObjectURL(dataBlob);
-                downloadFile(url, 'flex-time-export.csv');
+                downloadFile(URL.createObjectURL(dataBlob), 'flex-time-export-all.csv');
             });
 
             importFile.addEventListener('change', (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
-
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     try {
                         const importedData = JSON.parse(e.target.result);
-                        if (importedData.punches && typeof importedData.flexBankMinutes === 'number') {
-                            state.punches = importedData.punches;
-                            state.flexBankMinutes = importedData.flexBankMinutes;
+                        if (importedData.allPunches && typeof importedData.flexBankMinutes === 'number') {
+                            // Re-hydrate dates
+                            importedData.calendarDate = new Date(importedData.calendarDate);
+                            importedData.viewingDate = new Date(importedData.viewingDate);
+                            state = importedData;
                             saveState();
                             render();
                             showMessage('Data successfully imported!');
-                        } else {
-                            showMessage('Error: Invalid JSON file format.');
-                        }
-                    } catch (error) {
-                         showMessage('Error: Could not parse JSON file.');
-                    }
+                        } else { showMessage('Error: Invalid JSON file format.'); }
+                    } catch (error) { showMessage('Error: Could not parse JSON file.'); }
                 };
                 reader.readAsText(file);
-                event.target.value = ''; // Reset input
+                event.target.value = '';
             });
 
-
             // --- Helper Functions ---
-
-            /**
-             * Updates the timezone button text based on the current mode.
-             */
             function updateTimezoneButton() {
                 toggleTimezoneBtn.textContent = state.isUTC ? 'Show Local' : 'Show UTC';
             }
 
-            /**
-             * Formats a total number of minutes into a human-readable "Xh Ym" string.
-             * @param {number} totalMinutes - The total minutes to format.
-             * @returns {string} The formatted string.
-             */
             function formatMinutesToHours(totalMinutes) {
                 if (isNaN(totalMinutes)) return '0h 0m';
                 const sign = totalMinutes < 0 ? '-' : '';
@@ -508,11 +596,6 @@
                 return `${sign}${hours}h ${minutes}m`;
             }
             
-            /**
-             * Triggers a file download in the browser.
-             * @param {string} url - The URL of the file to download.
-             * @param {string} filename - The desired name of the file.
-             */
             function downloadFile(url, filename) {
                 const a = document.createElement('a');
                 a.href = url;
