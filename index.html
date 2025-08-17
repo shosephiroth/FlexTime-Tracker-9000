@@ -322,10 +322,8 @@
 
             // --- History and State Management ---
             function recordChange(changeFunction) {
-                // Create a deep copy of the current state for the history
                 const currentState = JSON.stringify(state);
                 
-                // If we've undone, clear the future history before adding a new state
                 if (historyIndex < history.length - 1) {
                     history = history.slice(0, historyIndex + 1);
                 }
@@ -333,13 +331,12 @@
                 history.push(currentState);
                 historyIndex++;
 
-                // Limit history size to prevent memory issues
                 if (history.length > 50) {
                     history.shift();
                     historyIndex--;
                 }
 
-                changeFunction(); // Apply the change to the state
+                changeFunction();
                 
                 saveState();
                 render();
@@ -349,9 +346,12 @@
                 if (historyIndex > 0) {
                     historyIndex--;
                     state = JSON.parse(history[historyIndex]);
-                    // Re-hydrate date objects
                     state.calendarDate = new Date(state.calendarDate);
                     state.viewingDate = new Date(state.viewingDate);
+                    
+                    logAction('Undo action performed.');
+                    history[historyIndex] = JSON.stringify(state);
+
                     saveState();
                     render();
                 }
@@ -361,9 +361,12 @@
                 if (historyIndex < history.length - 1) {
                     historyIndex++;
                     state = JSON.parse(history[historyIndex]);
-                    // Re-hydrate date objects
                     state.calendarDate = new Date(state.calendarDate);
                     state.viewingDate = new Date(state.viewingDate);
+
+                    logAction('Redo action performed.');
+                    history[historyIndex] = JSON.stringify(state);
+
                     saveState();
                     render();
                 }
