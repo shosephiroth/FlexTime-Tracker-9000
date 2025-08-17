@@ -101,6 +101,13 @@
             background-color: #b4a62a !important;
             color: #1a1a1a !important;
         }
+        .audit-log-container {
+            max-height: 150px;
+            overflow-y: auto;
+            background-color: #111;
+            padding: 8px;
+            border: 2px solid #555;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -153,6 +160,12 @@
             </div>
         </div>
 
+        <!-- Audit Log -->
+        <div class="pixel-border p-4 mb-8">
+            <h2 class="text-2xl mb-2 text-shadow text-green-400">> Audit Log_</h2>
+            <div id="auditLogContainer" class="audit-log-container text-xs space-y-1"></div>
+        </div>
+
         <!-- Flex Bank -->
         <div class="pixel-border p-4 mb-8">
             <h2 class="text-2xl mb-4 text-shadow text-blue-400">> Flex Bank_</h2>
@@ -167,12 +180,13 @@
         <div class="pixel-border p-4">
             <h2 class="text-2xl mb-4 text-shadow text-red-400">> System Controls_</h2>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <button id="undoBtn" class="pixel-button p-3">Undo</button>
+                <button id="redoBtn" class="pixel-button p-3">Redo</button>
                 <button id="settingsBtn" class="pixel-button p-3">Settings</button>
                 <button id="toggleTimezoneBtn" class="pixel-button p-3">Show UTC</button>
                 <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import</label>
                 <input type="file" id="importFile" class="hidden" accept=".json">
                 <button id="exportJsonBtn" class="pixel-button p-3">Export JSON</button>
-                
                 <button id="commitDayBtn" class="pixel-button pixel-button-blue p-3">Save Day</button>
                 <button id="copyDayBtn" class="pixel-button p-3">Copy Day</button>
                 <button id="copyWeekBtn" class="pixel-button p-3">Copy Week</button>
@@ -246,6 +260,7 @@
             const lunchOutBtn = document.getElementById('lunchOutBtn');
             const addPunchBtn = document.getElementById('addPunchBtn');
             const punchLog = document.getElementById('punchLog');
+            const auditLogContainer = document.getElementById('auditLogContainer');
             const flexBankHoursEl = document.getElementById('flexBankHours');
             const dayAccrualEl = document.getElementById('dayAccrual');
             const workdayBasis = document.getElementById('workdayBasis');
@@ -261,12 +276,8 @@
             const backToTodayBtn = document.getElementById('backToTodayBtn');
             const copyStatus = document.getElementById('copyStatus');
             const settingsBtn = document.getElementById('settingsBtn');
-            
-            // Calendar Elements
-            const calendarGrid = document.getElementById('calendarGrid');
-            const monthYearHeader = document.getElementById('monthYearHeader');
-            const prevMonthBtn = document.getElementById('prevMonthBtn');
-            const nextMonthBtn = document.getElementById('nextMonthBtn');
+            const undoBtn = document.getElementById('undoBtn');
+            const redoBtn = document.getElementById('redoBtn');
             
             // Modal Elements
             const settingsModal = document.getElementById('settingsModal');
@@ -292,63 +303,105 @@
 
             // --- App State ---
             let state = {
-                allPunches: {}, // Keyed by 'YYYY-MM-DD'
-                settings: {
-                    dailyGoalHours: 8,
-                },
+                allPunches: {}, // Keyed by 'YYYY-MM-DD', now holds { punches: [], log: [] }
+                settings: { dailyGoalHours: 8 },
                 isUTC: false,
                 editingPunchIndex: null,
                 calendarDate: new Date(),
                 viewingDate: new Date(),
                 confirmCallback: null,
-                copyMode: null, // can be 'day', 'week', 'month'
+                copyMode: null, 
                 copiedData: null,
             };
+            
+            // History for Undo/Redo
+            let history = [];
+            let historyIndex = -1;
 
             const toYYYYMMDD = (date) => date.toISOString().slice(0, 10);
 
-            // --- Core Functions ---
-            function addPunch(type, timestamp) {
-                const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                if (!state.allPunches[viewingDateKey]) {
-                    state.allPunches[viewingDateKey] = [];
+            // --- History and State Management ---
+            function recordChange(changeFunction) {
+                // Create a deep copy of the current state for the history
+                const currentState = JSON.stringify(state);
+                
+                // If we've undone, clear the future history before adding a new state
+                if (historyIndex < history.length - 1) {
+                    history = history.slice(0, historyIndex + 1);
                 }
                 
-                let punchTimestamp;
-                if (timestamp) {
-                    punchTimestamp = new Date(timestamp).toISOString();
-                } else {
-                    const newPunchTime = new Date();
-                    newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
-                    punchTimestamp = newPunchTime.toISOString();
+                history.push(currentState);
+                historyIndex++;
+
+                // Limit history size to prevent memory issues
+                if (history.length > 50) {
+                    history.shift();
+                    historyIndex--;
                 }
 
-                state.allPunches[viewingDateKey].push({ type, timestamp: punchTimestamp });
+                changeFunction(); // Apply the change to the state
+                
                 saveState();
                 render();
             }
 
+            function undo() {
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    state = JSON.parse(history[historyIndex]);
+                    // Re-hydrate date objects
+                    state.calendarDate = new Date(state.calendarDate);
+                    state.viewingDate = new Date(state.viewingDate);
+                    saveState();
+                    render();
+                }
+            }
+
+            function redo() {
+                if (historyIndex < history.length - 1) {
+                    historyIndex++;
+                    state = JSON.parse(history[historyIndex]);
+                    // Re-hydrate date objects
+                    state.calendarDate = new Date(state.calendarDate);
+                    state.viewingDate = new Date(state.viewingDate);
+                    saveState();
+                    render();
+                }
+            }
+            
+            function logAction(message) {
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                if (!state.allPunches[viewingDateKey]) {
+                    state.allPunches[viewingDateKey] = { punches: [], log: [] };
+                }
+                if (!state.allPunches[viewingDateKey].log) {
+                    state.allPunches[viewingDateKey].log = [];
+                }
+                const time = new Date().toLocaleTimeString();
+                state.allPunches[viewingDateKey].log.push(`[${time}] ${message}`);
+            }
+
+            // --- Core Functions ---
             function render() {
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                const todayKey = toYYYYMMDD(new Date());
-                const isViewingToday = viewingDateKey === todayKey;
-                const punchesForDay = state.allPunches[viewingDateKey] || [];
+                const dayData = state.allPunches[viewingDateKey] || { punches: [], log: [] };
+                const punchesForDay = dayData.punches;
 
                 renderCalendar();
                 renderPunchLog(punchesForDay);
+                renderAuditLog(dayData.log || []);
                 calculateAndRenderFlexBank();
                 updateTimezoneButton();
                 updateButtonStates(punchesForDay);
                 
                 viewingDateHeader.textContent = `[ ${state.viewingDate.toDateString()} ]`;
-                backToTodayBtn.classList.toggle('hidden', isViewingToday);
-                commitDayBtn.textContent = isViewingToday ? 'Commit Today' : 'Save Day';
+                backToTodayBtn.classList.toggle('hidden', viewingDateKey === toYYYYMMDD(new Date()));
+                commitDayBtn.textContent = (viewingDateKey === toYYYYMMDD(new Date())) ? 'Commit Today' : 'Save Day';
                 clearDayBtn.disabled = punchesForDay.length === 0;
                 
                 const punchButtons = [clockInBtn, clockOutBtn, lunchInBtn, lunchOutBtn];
-                punchButtons.forEach(btn => btn.disabled = !isViewingToday || btn.disabled);
+                punchButtons.forEach(btn => btn.disabled = (viewingDateKey !== toYYYYMMDD(new Date())) || btn.disabled);
 
-                // Handle copy mode UI
                 appContainer.classList.toggle('is-copying', !!state.copyMode);
                 copyDayBtn.textContent = state.copyMode === 'day' ? 'Cancel' : 'Copy Day';
                 copyWeekBtn.textContent = state.copyMode === 'week' ? 'Cancel' : 'Copy Week';
@@ -356,11 +409,13 @@
                 copyDayBtn.disabled = punchesForDay.length === 0 && state.copyMode !== 'day';
                 copyWeekBtn.disabled = state.copyMode && state.copyMode !== 'week';
                 copyMonthBtn.disabled = state.copyMode && state.copyMode !== 'month';
-
                 copyStatus.classList.toggle('hidden', !state.copyMode);
                 if(state.copyMode) {
                     copyStatus.textContent = `Copying ${state.copyMode}. Select a destination start date.`;
                 }
+
+                undoBtn.disabled = historyIndex <= 0;
+                redoBtn.disabled = historyIndex >= history.length - 1;
             }
 
             function renderPunchLog(punches) {
@@ -388,6 +443,20 @@
                     `;
                     punchLog.appendChild(tr);
                 });
+            }
+
+            function renderAuditLog(log) {
+                auditLogContainer.innerHTML = '';
+                if (!log || log.length === 0) {
+                    auditLogContainer.innerHTML = '<p class="text-gray-400">[ No actions logged for this day ]</p>';
+                    return;
+                }
+                log.forEach(entry => {
+                    const p = document.createElement('p');
+                    p.textContent = entry;
+                    auditLogContainer.appendChild(p);
+                });
+                auditLogContainer.scrollTop = auditLogContainer.scrollHeight;
             }
             
             function updateButtonStates(punches) {
@@ -427,7 +496,8 @@
                 for (const dateKey in state.allPunches) {
                     if (dateKey >= todayKey) continue;
                     
-                    const dailyMinutes = calculateDailyWorkedMinutes(state.allPunches[dateKey]);
+                    const dayData = state.allPunches[dateKey];
+                    const dailyMinutes = calculateDailyWorkedMinutes(dayData.punches);
                     if (dailyMinutes > 0) {
                         committedFlex += (dailyMinutes - dailyGoalMinutes);
                     }
@@ -435,7 +505,7 @@
                 flexBankHoursEl.textContent = formatMinutesToHours(committedFlex);
 
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                const viewingDayPunches = state.allPunches[viewingDateKey] || [];
+                const viewingDayPunches = (state.allPunches[viewingDateKey] || {punches:[]}).punches;
                 const viewingDayMinutes = calculateDailyWorkedMinutes(viewingDayPunches);
                 const viewingDayFlex = viewingDayMinutes > 0 ? viewingDayMinutes - dailyGoalMinutes : 0;
                 dayAccrualEl.textContent = formatMinutesToHours(viewingDayFlex);
@@ -478,7 +548,6 @@
                 return totalMillis / (1000 * 60);
             }
 
-            // --- Calendar Functions ---
             function renderCalendar() {
                 calendarGrid.innerHTML = '';
                 const date = state.calendarDate;
@@ -503,7 +572,7 @@
                     dayEl.classList.add('calendar-day');
                     dayEl.dataset.date = dayKey;
 
-                    if (state.allPunches[dayKey] && state.allPunches[dayKey].length > 0) dayEl.classList.add('has-data');
+                    if (state.allPunches[dayKey] && state.allPunches[dayKey].punches.length > 0) dayEl.classList.add('has-data');
                     if (dayKey === toYYYYMMDD(new Date())) dayEl.classList.add('is-today');
                     if (dayKey === toYYYYMMDD(state.viewingDate)) dayEl.classList.add('is-viewing');
                     
@@ -511,24 +580,24 @@
                 }
             }
 
-            // --- State Management ---
             function saveState() {
-                localStorage.setItem('flexTimeTrackerState_v6', JSON.stringify(state));
+                localStorage.setItem('flexTimeTrackerState_v7', JSON.stringify(state));
             }
 
             function loadState() {
-                const savedState = localStorage.getItem('flexTimeTrackerState_v6');
+                const savedState = localStorage.getItem('flexTimeTrackerState_v7');
                 if (savedState) {
                     const parsedState = JSON.parse(savedState);
-                    // Merge saved state with default state to handle new properties
                     state = { ...state, ...parsedState };
                     state.calendarDate = new Date(state.calendarDate);
                     state.viewingDate = new Date(state.viewingDate);
-                    // Ensure settings object exists
                     if (!state.settings) {
                         state.settings = { dailyGoalHours: 8 };
                     }
                 }
+                // Initialize history
+                history = [JSON.stringify(state)];
+                historyIndex = 0;
             }
             
             function cancelCopy() {
@@ -538,22 +607,48 @@
             }
 
             // --- Event Handlers ---
-            clockInBtn.addEventListener('click', () => addPunch('Clock In'));
-            clockOutBtn.addEventListener('click', () => addPunch('Clock Out'));
-            lunchInBtn.addEventListener('click', () => addPunch('Lunch In'));
-            lunchOutBtn.addEventListener('click', () => addPunch('Lunch Out'));
+            undoBtn.addEventListener('click', undo);
+            redoBtn.addEventListener('click', redo);
 
-            toggleTimezoneBtn.addEventListener('click', () => {
-                state.isUTC = !state.isUTC;
-                render();
-            });
-            
+            clockInBtn.addEventListener('click', () => recordChange(() => {
+                logAction('Clocked In.');
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                if (!state.allPunches[viewingDateKey]) state.allPunches[viewingDateKey] = { punches: [], log: [] };
+                const newPunchTime = new Date();
+                newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
+                state.allPunches[viewingDateKey].punches.push({ type: 'Clock In', timestamp: newPunchTime.toISOString() });
+            }));
+            clockOutBtn.addEventListener('click', () => recordChange(() => {
+                logAction('Clocked Out.');
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                if (!state.allPunches[viewingDateKey]) state.allPunches[viewingDateKey] = { punches: [], log: [] };
+                const newPunchTime = new Date();
+                newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
+                state.allPunches[viewingDateKey].punches.push({ type: 'Clock Out', timestamp: newPunchTime.toISOString() });
+            }));
+            lunchInBtn.addEventListener('click', () => recordChange(() => {
+                logAction('Punched in from lunch.');
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                if (!state.allPunches[viewingDateKey]) state.allPunches[viewingDateKey] = { punches: [], log: [] };
+                const newPunchTime = new Date();
+                newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
+                state.allPunches[viewingDateKey].punches.push({ type: 'Lunch In', timestamp: newPunchTime.toISOString() });
+            }));
+            lunchOutBtn.addEventListener('click', () => recordChange(() => {
+                logAction('Punched out for lunch.');
+                const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                if (!state.allPunches[viewingDateKey]) state.allPunches[viewingDateKey] = { punches: [], log: [] };
+                const newPunchTime = new Date();
+                newPunchTime.setFullYear(state.viewingDate.getFullYear(), state.viewingDate.getMonth(), state.viewingDate.getDate());
+                state.allPunches[viewingDateKey].punches.push({ type: 'Lunch Out', timestamp: newPunchTime.toISOString() });
+            }));
+
             commitDayBtn.addEventListener('click', () => {
                 saveState();
                 showMessage(`Data for ${toYYYYMMDD(state.viewingDate)} has been saved.`);
-                render();
+                // No history change for just saving
             });
-            
+
             copyDayBtn.addEventListener('click', () => {
                 if (state.copyMode === 'day') {
                     cancelCopy();
@@ -562,7 +657,7 @@
                 const viewingDateKey = toYYYYMMDD(state.viewingDate);
                 state.copyMode = 'day';
                 state.copiedData = {
-                    punches: state.allPunches[viewingDateKey] ? JSON.parse(JSON.stringify(state.allPunches[viewingDateKey])) : []
+                    punches: state.allPunches[viewingDateKey] ? JSON.parse(JSON.stringify(state.allPunches[viewingDateKey].punches)) : []
                 };
                 render();
             });
@@ -582,14 +677,11 @@
                     date.setDate(date.getDate() + i);
                     const dateKey = toYYYYMMDD(date);
                     if (state.allPunches[dateKey]) {
-                        weekPunches[dateKey] = JSON.parse(JSON.stringify(state.allPunches[dateKey]));
+                        weekPunches[dateKey] = JSON.parse(JSON.stringify(state.allPunches[dateKey].punches));
                     }
                 }
                 state.copyMode = 'week';
-                state.copiedData = {
-                    startDate: toYYYYMMDD(startDate),
-                    punches: weekPunches,
-                };
+                state.copiedData = { startDate: toYYYYMMDD(startDate), punches: weekPunches };
                 render();
             });
             
@@ -609,23 +701,23 @@
                     date.setDate(date.getDate() + i);
                     const dateKey = toYYYYMMDD(date);
                      if (state.allPunches[dateKey]) {
-                        monthPunches[dateKey] = JSON.parse(JSON.stringify(state.allPunches[dateKey]));
+                        monthPunches[dateKey] = JSON.parse(JSON.stringify(state.allPunches[dateKey].punches));
                     }
                 }
                 state.copyMode = 'month';
-                state.copiedData = {
-                    startDate: toYYYYMMDD(startDate),
-                    punches: monthPunches,
-                };
+                state.copiedData = { startDate: toYYYYMMDD(startDate), punches: monthPunches };
                 render();
             });
 
             clearDayBtn.addEventListener('click', () => {
                 showConfirmation('Are you sure you want to clear all punches for this day?', () => {
-                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                    state.allPunches[viewingDateKey] = [];
-                    saveState();
-                    render();
+                    recordChange(() => {
+                        const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                        logAction('Cleared all punches for the day.');
+                        if(state.allPunches[viewingDateKey]) {
+                            state.allPunches[viewingDateKey].punches = [];
+                        }
+                    });
                 });
             });
             
@@ -657,39 +749,43 @@
 
             function handlePaste(targetDateKey) {
                 showConfirmation(`Paste punches to ${targetDateKey}? This will overwrite existing data.`, () => {
-                    if (state.copyMode === 'day') {
-                        const newPunches = JSON.parse(JSON.stringify(state.copiedData.punches));
-                        const [year, month, day] = targetDateKey.split('-').map(Number);
-                        newPunches.forEach(punch => {
-                            const oldDate = new Date(punch.timestamp);
-                            const newDate = new Date(Date.UTC(year, month - 1, day, oldDate.getUTCHours(), oldDate.getUTCMinutes(), oldDate.getUTCSeconds()));
-                            punch.timestamp = newDate.toISOString();
-                        });
-                        state.allPunches[targetDateKey] = newPunches;
-                    } else if (state.copyMode === 'week' || state.copyMode === 'month') {
-                        const sourceStartDate = new Date(state.copiedData.startDate + 'T12:00:00');
-                        const destStartDate = new Date(targetDateKey + 'T12:00:00');
-                        
-                        for (const sourceDateKey in state.copiedData.punches) {
-                            const sourceDate = new Date(sourceDateKey + 'T12:00:00');
-                            const offset = (sourceDate - sourceStartDate) / (1000 * 60 * 60 * 24);
-                            
-                            const destDate = new Date(destStartDate);
-                            destDate.setDate(destDate.getDate() + offset);
-                            const destDateKey = toYYYYMMDD(destDate);
-
-                            const newPunches = JSON.parse(JSON.stringify(state.copiedData.punches[sourceDateKey]));
+                    recordChange(() => {
+                        if (state.copyMode === 'day') {
+                            const newPunches = JSON.parse(JSON.stringify(state.copiedData.punches));
+                            const [year, month, day] = targetDateKey.split('-').map(Number);
                             newPunches.forEach(punch => {
                                 const oldDate = new Date(punch.timestamp);
-                                const newDate = new Date(Date.UTC(destDate.getFullYear(), destDate.getMonth(), destDate.getDate(), oldDate.getUTCHours(), oldDate.getUTCMinutes(), oldDate.getUTCSeconds()));
+                                const newDate = new Date(Date.UTC(year, month - 1, day, oldDate.getUTCHours(), oldDate.getUTCMinutes(), oldDate.getUTCSeconds()));
                                 punch.timestamp = newDate.toISOString();
                             });
-                            state.allPunches[destDateKey] = newPunches;
+                            if (!state.allPunches[targetDateKey]) state.allPunches[targetDateKey] = { punches: [], log: [] };
+                            state.allPunches[targetDateKey].punches = newPunches;
+                            logAction(`Pasted day from ${toYYYYMMDD(state.viewingDate)}.`);
+                        } else if (state.copyMode === 'week' || state.copyMode === 'month') {
+                            const sourceStartDate = new Date(state.copiedData.startDate + 'T12:00:00');
+                            const destStartDate = new Date(targetDateKey + 'T12:00:00');
+                            
+                            for (const sourceDateKey in state.copiedData.punches) {
+                                const sourceDate = new Date(sourceDateKey + 'T12:00:00');
+                                const offset = (sourceDate - sourceStartDate) / (1000 * 60 * 60 * 24);
+                                
+                                const destDate = new Date(destStartDate);
+                                destDate.setDate(destDate.getDate() + offset);
+                                const destDateKey = toYYYYMMDD(destDate);
+
+                                const newPunches = JSON.parse(JSON.stringify(state.copiedData.punches[sourceDateKey]));
+                                newPunches.forEach(punch => {
+                                    const oldDate = new Date(punch.timestamp);
+                                    const newDate = new Date(Date.UTC(destDate.getFullYear(), destDate.getMonth(), destDate.getDate(), oldDate.getUTCHours(), oldDate.getUTCMinutes(), oldDate.getUTCSeconds()));
+                                    punch.timestamp = newDate.toISOString();
+                                });
+                                if (!state.allPunches[destDateKey]) state.allPunches[destDateKey] = { punches: [], log: [] };
+                                state.allPunches[destDateKey].punches = newPunches;
+                            }
+                            logAction(`Pasted ${state.copyMode} starting from ${state.copiedData.startDate}.`);
                         }
-                    }
-                    cancelCopy();
-                    saveState();
-                    render();
+                        cancelCopy();
+                    });
                 });
             }
 
@@ -702,16 +798,19 @@
 
                 if (action === 'edit') {
                     state.editingPunchIndex = parseInt(index, 10);
-                    const punchTimestamp = new Date(state.allPunches[viewingDateKey][state.editingPunchIndex].timestamp);
+                    const punchTimestamp = new Date(state.allPunches[viewingDateKey].punches[state.editingPunchIndex].timestamp);
                     const tzoffset = punchTimestamp.getTimezoneOffset() * 60000;
                     const localISOTime = (new Date(punchTimestamp - tzoffset)).toISOString().slice(0, 16);
                     editTimestampInput.value = localISOTime;
                     editModal.classList.remove('hidden');
                 } else if (action === 'delete') {
                     showConfirmation('Delete this punch?', () => {
-                        state.allPunches[viewingDateKey].splice(parseInt(index, 10), 1);
-                        saveState();
-                        render();
+                        recordChange(() => {
+                            const idxToDelete = parseInt(index, 10);
+                            const deletedPunch = state.allPunches[viewingDateKey].punches[idxToDelete];
+                            logAction(`Deleted punch: ${deletedPunch.type} @ ${new Date(deletedPunch.timestamp).toLocaleString()}`);
+                            state.allPunches[viewingDateKey].punches.splice(idxToDelete, 1);
+                        });
                     });
                 }
             });
@@ -727,9 +826,10 @@
             saveSettingsBtn.addEventListener('click', () => {
                 const newHours = parseFloat(dailyGoalHoursInput.value);
                 if (!isNaN(newHours) && newHours > 0) {
-                    state.settings.dailyGoalHours = newHours;
-                    saveState();
-                    render();
+                    recordChange(() => {
+                        logAction(`Changed workday hours from ${state.settings.dailyGoalHours} to ${newHours}.`);
+                        state.settings.dailyGoalHours = newHours;
+                    });
                     settingsModal.classList.add('hidden');
                 } else {
                     showMessage('Please enter a valid number of hours.');
@@ -753,18 +853,27 @@
                     showMessage("Please select a valid date and time.");
                     return;
                 }
-                addPunch(addPunchType.value, addTimestampInput.value);
+                recordChange(() => {
+                    const type = addPunchType.value;
+                    const timestamp = addTimestampInput.value;
+                    logAction(`Manually added punch: ${type} @ ${new Date(timestamp).toLocaleString()}`);
+                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                    if (!state.allPunches[viewingDateKey]) state.allPunches[viewingDateKey] = { punches: [], log: [] };
+                    state.allPunches[viewingDateKey].punches.push({ type, timestamp: new Date(timestamp).toISOString() });
+                });
                 addPunchModal.classList.add('hidden');
             });
 
             saveEditBtn.addEventListener('click', () => {
                 if (state.editingPunchIndex !== null) {
-                    const viewingDateKey = toYYYYMMDD(state.viewingDate);
-                    const newTimestamp = new Date(editTimestampInput.value).toISOString();
-                    state.allPunches[viewingDateKey][state.editingPunchIndex].timestamp = newTimestamp;
+                    recordChange(() => {
+                        const viewingDateKey = toYYYYMMDD(state.viewingDate);
+                        const oldPunch = state.allPunches[viewingDateKey].punches[state.editingPunchIndex];
+                        const newTimestamp = new Date(editTimestampInput.value).toISOString();
+                        logAction(`Edited punch from ${oldPunch.type} @ ${new Date(oldPunch.timestamp).toLocaleString()} to ${new Date(newTimestamp).toLocaleString()}`);
+                        state.allPunches[viewingDateKey].punches[state.editingPunchIndex].timestamp = newTimestamp;
+                    });
                     closeEditModal();
-                    saveState();
-                    render();
                 }
             });
 
@@ -813,17 +922,14 @@
                     try {
                         const importedData = JSON.parse(e.target.result);
                         if (importedData.allPunches) {
-                            // Merge imported data with defaults to ensure new settings are not lost
-                            const defaultState = {
-                                settings: { dailyGoalHours: 8 },
-                                isUTC: false,
-                                copyMode: null,
-                                copiedData: null,
-                            };
+                            const defaultState = { settings: { dailyGoalHours: 8 }, isUTC: false, copyMode: null, copiedData: null };
                             state = { ...defaultState, ...importedData };
                             state.calendarDate = new Date(state.calendarDate);
                             state.viewingDate = new Date(state.viewingDate);
                             saveState();
+                            // After import, reset history
+                            history = [JSON.stringify(state)];
+                            historyIndex = 0;
                             render();
                             showMessage('Data successfully imported!');
                         } else { showMessage('Error: Invalid JSON file format.'); }
