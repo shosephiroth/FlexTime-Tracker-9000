@@ -1,4 +1,6 @@
 # **FlexTime Tracker 9000**
+[Available Here](https://shosephiroth.github.io/FlexTime-Tracker-9000/)
+---
 
 A retro, 8-bit styled timekeeping web application designed to help you track your work hours and manage your flex time with precision and a bit of fun. Built with vanilla HTML, JavaScript, and Tailwind CSS, this app runs entirely in your browser and saves all data locally.
 
