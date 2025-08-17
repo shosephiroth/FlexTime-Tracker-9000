@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlexTime Tracker 9000</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive;
+            background-color: #1a1a1a;
+            color: #f0f0f0;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+        .pixel-border {
+            border: 4px solid #f0f0f0;
+            box-shadow: 
+                4px 4px 0px #888,
+                inset 0 0 0 2px #444;
+            background-color: #2a2a2a;
+        }
+        .pixel-button {
+            border: 4px solid #f0f0f0;
+            box-shadow: 4px 4px 0px #888;
+            background-color: #4a4a4a;
+            color: #f0f0f0;
+            transition: all 0.1s ease-in-out;
+            cursor: pointer;
+        }
+        .pixel-button:active {
+            transform: translate(4px, 4px);
+            box-shadow: none;
+        }
+        .pixel-button-green { background-color: #2a8a2a; }
+        .pixel-button-red { background-color: #a02a2a; }
+        .pixel-button-blue { background-color: #2a2a8a; }
+        .pixel-button-yellow { background-color: #b4a62a; }
+        
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            width: 90%;
+            max-width: 500px;
+        }
+        .text-shadow {
+            text-shadow: 2px 2px 0 #000;
+        }
+        /* Style for datetime-local input */
+        input[type="datetime-local"] {
+            background-color: #333;
+            border: 2px solid #f0f0f0;
+            color: #f0f0f0;
+            padding: 8px;
+            font-family: 'Press Start 2P', cursive;
+        }
+        /* Custom scrollbar for a retro feel */
+        ::-webkit-scrollbar {
+            width: 16px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #2a2a2a;
+            border-left: 4px solid #f0f0f0;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border: 4px solid #f0f0f0;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #aaa;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="container mx-auto max-w-4xl">
+        <h1 class="text-3xl md:text-5xl text-center mb-8 text-shadow text-yellow-400">[ FlexTime Tracker 9000 ]</h1>
+
+        <!-- Punch Controls -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <button id="clockInBtn" class="pixel-button pixel-button-green p-4 text-lg">Clock In</button>
+            <button id="clockOutBtn" class="pixel-button pixel-button-red p-4 text-lg">Clock Out</button>
+            <button id="lunchInBtn" class="pixel-button pixel-button-blue p-4 text-lg">Lunch In</button>
+            <button id="lunchOutBtn" class="pixel-button pixel-button-yellow p-4 text-lg">Lunch Out</button>
+        </div>
+
+        <!-- Time Log -->
+        <div class="pixel-border p-4 mb-8">
+            <h2 class="text-2xl mb-4 text-shadow text-green-400">> Daily Log_</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr>
+                            <th class="p-2 border-b-4 border-gray-400">Type</th>
+                            <th class="p-2 border-b-4 border-gray-400">Timestamp</th>
+                            <th class="p-2 border-b-4 border-gray-400">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="punchLog">
+                        <!-- Punch entries will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Flex Bank -->
+        <div class="pixel-border p-4 mb-8">
+            <h2 class="text-2xl mb-4 text-shadow text-blue-400">> Flex Bank_</h2>
+            <div class="text-xl">
+                <p>Total Minutes: <span id="flexBankMinutes" class="text-yellow-400">0</span></p>
+                <p>Total Hours: <span id="flexBankHours" class="text-yellow-400">0h 0m</span></p>
+                <p class="text-sm mt-2">(Based on an 8-hour workday)</p>
+            </div>
+        </div>
+
+        <!-- App Controls -->
+        <div class="pixel-border p-4">
+            <h2 class="text-2xl mb-4 text-shadow text-red-400">> System Controls_</h2>
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <button id="toggleTimezoneBtn" class="pixel-button p-3">Show UTC</button>
+                <button id="exportJsonBtn" class="pixel-button p-3">Export JSON</button>
+                <button id="exportCsvBtn" class="pixel-button p-3">Export CSV</button>
+                <label for="importFile" class="pixel-button p-3 text-center cursor-pointer">Import JSON</label>
+                <input type="file" id="importFile" class="hidden" accept=".json">
+                <button id="newDayBtn" class="pixel-button pixel-button-red p-3 col-span-2 md:col-span-1 lg:col-span-1">Commit & New Day</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal-backdrop hidden">
+        <div class="modal-content pixel-border p-6">
+            <h2 class="text-2xl mb-4 text-shadow text-yellow-400">> Edit Timestamp_</h2>
+            <input type="datetime-local" id="editTimestampInput" class="w-full mb-4">
+            <div class="flex justify-end gap-4">
+                <button id="cancelEditBtn" class="pixel-button p-3">Cancel</button>
+                <button id="saveEditBtn" class="pixel-button pixel-button-green p-3">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Message Modal -->
+    <div id="messageModal" class="modal-backdrop hidden">
+        <div class="modal-content pixel-border p-6 text-center">
+            <p id="messageText" class="text-xl mb-4"></p>
+            <button id="closeMessageBtn" class="pixel-button p-3">OK</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const clockInBtn = document.getElementById('clockInBtn');
+            const clockOutBtn = document.getElementById('clockOutBtn');
+            const lunchInBtn = document.getElementById('lunchInBtn');
+            const lunchOutBtn = document.getElementById('lunchOutBtn');
+            const punchLog = document.getElementById('punchLog');
+            const flexBankMinutesEl = document.getElementById('flexBankMinutes');
+            const flexBankHoursEl = document.getElementById('flexBankHours');
+            const toggleTimezoneBtn = document.getElementById('toggleTimezoneBtn');
+            const exportJsonBtn = document.getElementById('exportJsonBtn');
+            const exportCsvBtn = document.getElementById('exportCsvBtn');
+            const importFile = document.getElementById('importFile');
+            const newDayBtn = document.getElementById('newDayBtn');
+            
+            // Modal Elements
+            const editModal = document.getElementById('editModal');
+            const editTimestampInput = document.getElementById('editTimestampInput');
+            const saveEditBtn = document.getElementById('saveEditBtn');
+            const cancelEditBtn = document.getElementById('cancelEditBtn');
+            const messageModal = document.getElementById('messageModal');
+            const messageText = document.getElementById('messageText');
+            const closeMessageBtn = document.getElementById('closeMessageBtn');
+
+            // App State
+            let state = {
+                punches: [],
+                flexBankMinutes: 0,
+                isUTC: false,
+                editingPunchIndex: null,
+            };
+
+            const DAILY_GOAL_MINUTES = 8 * 60;
+
+            // --- Core Functions ---
+
+            /**
+             * Adds a new punch to the state.
+             * @param {string} type - The type of punch (e.g., 'Clock In').
+             */
+            function addPunch(type) {
+                state.punches.push({ type, timestamp: new Date().toISOString() });
+                saveState();
+                render();
+            }
+
+            /**
+             * Renders the entire application based on the current state.
+             */
+            function render() {
+                renderPunchLog();
+                calculateAndRenderFlexBank();
+                updateTimezoneButton();
+            }
+
+            /**
+             * Renders the list of punches in the log table.
+             */
+            function renderPunchLog() {
+                punchLog.innerHTML = '';
+                if (state.punches.length === 0) {
+                    punchLog.innerHTML = '<tr><td colspan="3" class="p-2 text-center text-gray-400">[ No punches for today ]</td></tr>';
+                    return;
+                }
+
+                state.punches.forEach((punch, index) => {
+                    const tr = document.createElement('tr');
+                    const date = new Date(punch.timestamp);
+                    const formattedTime = state.isUTC ? date.toUTCString() : date.toLocaleString();
+                    
+                    tr.innerHTML = `
+                        <td class="p-2">${punch.type}</td>
+                        <td class="p-2">${formattedTime}</td>
+                        <td class="p-2">
+                            <button class="pixel-button text-sm p-1" data-index="${index}">Edit</button>
+                        </td>
+                    `;
+                    punchLog.appendChild(tr);
+                });
+            }
+
+            /**
+             * Calculates total worked minutes for the day and updates the Flex Bank display.
+             */
+            function calculateAndRenderFlexBank() {
+                const dailyMinutes = calculateDailyWorkedMinutes();
+                const dailyFlex = dailyMinutes > 0 ? dailyMinutes - DAILY_GOAL_MINUTES : 0;
+                
+                const totalFlexMinutes = state.flexBankMinutes + dailyFlex;
+
+                flexBankMinutesEl.textContent = totalFlexMinutes.toFixed(0);
+                flexBankHoursEl.textContent = formatMinutesToHours(totalFlexMinutes);
+            }
+
+            /**
+             * Calculates the total minutes worked based on the day's punches.
+             * @returns {number} Total minutes worked today.
+             */
+            function calculateDailyWorkedMinutes() {
+                let totalMillis = 0;
+                let clockInTime = null;
+                let lunchOutTime = null;
+                
+                // Sort punches by time to ensure correct calculation order
+                const sortedPunches = [...state.punches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                for (const punch of sortedPunches) {
+                    const punchTime = new Date(punch.timestamp).getTime();
+                    switch (punch.type) {
+                        case 'Clock In':
+                            if (clockInTime === null) clockInTime = punchTime;
+                            break;
+                        case 'Lunch Out':
+                            if (clockInTime !== null && lunchOutTime === null) {
+                                totalMillis += (punchTime - clockInTime);
+                                clockInTime = null;
+                                lunchOutTime = punchTime;
+                            }
+                            break;
+                        case 'Lunch In':
+                            if (lunchOutTime !== null) {
+                                lunchOutTime = null; // Reset lunch, clockIn will resume work period
+                                clockInTime = punchTime;
+                            }
+                            break;
+                        case 'Clock Out':
+                            if (clockInTime !== null) {
+                                totalMillis += (punchTime - clockInTime);
+                                clockInTime = null;
+                            }
+                            break;
+                    }
+                }
+                
+                // If user forgot to clock out, don't count ongoing time
+                return totalMillis / (1000 * 60);
+            }
+
+            // --- State Management ---
+
+            /**
+             * Saves the current application state to localStorage.
+             */
+            function saveState() {
+                localStorage.setItem('flexTimeTrackerState', JSON.stringify(state));
+            }
+
+            /**
+             * Loads the application state from localStorage.
+             */
+            function loadState() {
+                const savedState = localStorage.getItem('flexTimeTrackerState');
+                if (savedState) {
+                    state = JSON.parse(savedState);
+                }
+            }
+
+            // --- UI and Event Handlers ---
+
+            clockInBtn.addEventListener('click', () => addPunch('Clock In'));
+            clockOutBtn.addEventListener('click', () => addPunch('Clock Out'));
+            lunchInBtn.addEventListener('click', () => addPunch('Lunch In'));
+            lunchOutBtn.addEventListener('click', () => addPunch('Lunch Out'));
+
+            toggleTimezoneBtn.addEventListener('click', () => {
+                state.isUTC = !state.isUTC;
+                render();
+            });
+            
+            newDayBtn.addEventListener('click', () => {
+                const dailyMinutes = calculateDailyWorkedMinutes();
+                if (dailyMinutes > 0) {
+                    const dailyFlex = dailyMinutes - DAILY_GOAL_MINUTES;
+                    state.flexBankMinutes += dailyFlex;
+                }
+                state.punches = [];
+                saveState();
+                render();
+                showMessage('Day committed to Flex Bank! Ready for a new day.');
+            });
+
+            // Edit Modal Logic
+            punchLog.addEventListener('click', (e) => {
+                if (e.target.tagName === 'BUTTON') {
+                    const index = parseInt(e.target.dataset.index, 10);
+                    state.editingPunchIndex = index;
+                    const punchTimestamp = new Date(state.punches[index].timestamp);
+                    
+                    // Format for datetime-local input (YYYY-MM-DDTHH:mm)
+                    const tzoffset = punchTimestamp.getTimezoneOffset() * 60000;
+                    const localISOTime = (new Date(punchTimestamp - tzoffset)).toISOString().slice(0, 16);
+                    
+                    editTimestampInput.value = localISOTime;
+                    editModal.classList.remove('hidden');
+                }
+            });
+
+            saveEditBtn.addEventListener('click', () => {
+                if (state.editingPunchIndex !== null) {
+                    const newTimestamp = new Date(editTimestampInput.value).toISOString();
+                    state.punches[state.editingPunchIndex].timestamp = newTimestamp;
+                    closeEditModal();
+                    saveState();
+                    render();
+                }
+            });
+
+            cancelEditBtn.addEventListener('click', closeEditModal);
+
+            function closeEditModal() {
+                state.editingPunchIndex = null;
+                editModal.classList.add('hidden');
+            }
+            
+            // Message Modal Logic
+            function showMessage(message) {
+                messageText.textContent = message;
+                messageModal.classList.remove('hidden');
+            }
+            
+            closeMessageBtn.addEventListener('click', () => {
+                messageModal.classList.add('hidden');
+            });
+
+            // Import/Export Logic
+            exportJsonBtn.addEventListener('click', () => {
+                const dataStr = JSON.stringify({
+                    flexBankMinutes: state.flexBankMinutes,
+                    punches: state.punches
+                }, null, 2);
+                const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(dataBlob);
+                downloadFile(url, 'flex-time-backup.json');
+            });
+
+            exportCsvBtn.addEventListener('click', () => {
+                let csvContent = "Type,Timestamp\n";
+                state.punches.forEach(p => {
+                    csvContent += `${p.type},"${p.timestamp}"\n`;
+                });
+                const dataBlob = new Blob([csvContent], { type: 'text/csv' });
+                const url = URL.createObjectURL(dataBlob);
+                downloadFile(url, 'flex-time-export.csv');
+            });
+
+            importFile.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const importedData = JSON.parse(e.target.result);
+                        if (importedData.punches && typeof importedData.flexBankMinutes === 'number') {
+                            state.punches = importedData.punches;
+                            state.flexBankMinutes = importedData.flexBankMinutes;
+                            saveState();
+                            render();
+                            showMessage('Data successfully imported!');
+                        } else {
+                            showMessage('Error: Invalid JSON file format.');
+                        }
+                    } catch (error) {
+                         showMessage('Error: Could not parse JSON file.');
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = ''; // Reset input
+            });
+
+
+            // --- Helper Functions ---
+
+            /**
+             * Updates the timezone button text based on the current mode.
+             */
+            function updateTimezoneButton() {
+                toggleTimezoneBtn.textContent = state.isUTC ? 'Show Local' : 'Show UTC';
+            }
+
+            /**
+             * Formats a total number of minutes into a human-readable "Xh Ym" string.
+             * @param {number} totalMinutes - The total minutes to format.
+             * @returns {string} The formatted string.
+             */
+            function formatMinutesToHours(totalMinutes) {
+                if (isNaN(totalMinutes)) return '0h 0m';
+                const sign = totalMinutes < 0 ? '-' : '';
+                const absMinutes = Math.abs(totalMinutes);
+                const hours = Math.floor(absMinutes / 60);
+                const minutes = Math.round(absMinutes % 60);
+                return `${sign}${hours}h ${minutes}m`;
+            }
+            
+            /**
+             * Triggers a file download in the browser.
+             * @param {string} url - The URL of the file to download.
+             * @param {string} filename - The desired name of the file.
+             */
+            function downloadFile(url, filename) {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+
+            // --- Initial Load ---
+            loadState();
+            render();
+        });
+    </script>
+</body>
+</html>
